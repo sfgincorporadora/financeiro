@@ -65,7 +65,7 @@ async def main():
       # novo lançamento empresa + regra automática
       await pg.click('.top [data-act=novo]' if nm=='d' else '.fab'); await pg.wait_for_timeout(300)
       await pg.fill('#fNovo [name=item]','Claude - Novembro/26'); await pg.dispatch_event('#fNovo [name=item]','change'); await pg.wait_for_timeout(300)
-      print(nm,'form ambito', await J(pg,"[document.querySelector('#fNovo [name=ambito]').value, document.querySelector('#fNovo').classList.contains('modo-empresa'), getComputedStyle(document.querySelector('#fNovo [name=quadra]').closest('label')).display]"))
+      print(nm,'form ambito', await J(pg,"[document.querySelector('#fNovo [name=ambito]').value, document.querySelector('#fNovo').classList.contains('modo-empresa'), getComputedStyle(document.querySelector('#boxQuadras').closest('.so-obra')).display]"))
       await pg.fill('#fNovo [name=valor]','120,00'); await pg.wait_for_timeout(200)
       await pg.screenshot(path=f'{OUT}/{nm}_novo_empresa.png', full_page=True)
       if await pg.query_selector('#fNovo [name=emp]'):

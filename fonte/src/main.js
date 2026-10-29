@@ -134,7 +134,8 @@ const E = () => {
     obras: e.obras && e.obras.length ? e.obras : [e.local || 'Nova Juazeiro'],
     quadraObra: e.quadraObra || {},
     empresas: e.empresas && e.empresas.length ? e.empresas : [{ id: 'matriz', nome: 'SFG Incorporadora', cnpj: '', tipo: 'matriz' }],
-    obraEmpresa: e.obraEmpresa || {}
+    obraEmpresa: e.obraEmpresa || {},
+    obraInfo: e.obraInfo || {}
   };
 };
 const empPorId = id => E().empresas.find(x => x.id === id);
@@ -694,9 +695,10 @@ function formNovo(def = {}) {
       <label>O valor informado é<select name="modo"><option value="total">Total (dividir entre lotes e parcelas)</option><option value="cada">De cada lançamento</option></select></label></div>
     ${campoAmbito(def.ambito)}
     ${campoObra(def.quadra && def.quadra !== '-' ? obraDe(def.quadra) : '', def.emp)}
-    <div class="g2"><label class="so-obra">Quadra<select name="quadra">${opts(quadrasOpts(), def.quadra || '-')}</select></label>
-      <label>Vencimento${'<input type="date" name="venc" required value="' + (def.venc || h) + '">'}</label></div>
+    <input type="hidden" name="quadra" value="${esc(def.quadra || '-')}">
+    <div class="so-obra"><div class="lbl">Quadras <span class="muted">(marque uma ou mais; nenhuma = custo geral da obra)</span></div><div class="chips" id="boxQuadras"></div></div>
     <div id="boxLotes" class="so-obra"></div>
+    <label>Vencimento${'<input type="date" name="venc" required value="' + (def.venc || h) + '">'}</label>
     <label class="chk"><input type="checkbox" name="recorrente" ${def.recorrente ? 'checked' : ''}> Conta recorrente, sem data final (contador, aluguel, internet…)</label>
     <div id="boxRec" class="g2 hidden"><label>Repete<select name="freq">${opts(FREQ, '1')}</select></label><label>Termina em <span class="muted">(opcional)</span><input type="date" name="fimRec"></label></div>
     <div class="g2" id="rowParc"><label>Parcelas<input name="parcelas" type="number" min="1" max="240" value="1" inputmode="numeric"></label>
@@ -716,16 +718,24 @@ function formNovo(def = {}) {
   const F = f.el.querySelector('#fNovo');
   let tipo = def.tipo === 'entrada' ? 'entrada' : 'saida';
   $$('#segTipo button', F).forEach(b => b.onclick = () => { tipo = b.dataset.v; $$('#segTipo button', F).forEach(x => x.classList.toggle('on', x === b)); F.destino.value = tipo === 'entrada' ? 'Venda' : 'Material'; $('#rowEtapa', F).classList.toggle('hidden', tipo === 'entrada'); prev(); });
+  const qsMarcadas = () => $$('[name=qsel]:checked', F).map(c => c.value);
+  const quadrasBox = () => {
+    const ob = F.obra ? F.obra.value : ''; const marc = new Set(qsMarcadas().length ? qsMarcadas() : (F.quadra.value !== '-' ? [F.quadra.value] : []));
+    const qs = quadrasDaObra(variasObras() ? ob : '');
+    $('#boxQuadras', F).innerHTML = qs.map(q => `<label class="pick"><input type="checkbox" name="qsel" value="${esc(q)}" ${marc.has(q) ? 'checked' : ''}><span>${esc(q)}</span></label>`).join('') || '<span class="muted small">Nenhuma quadra nesta obra.</span>';
+  };
   const lotesBox = () => {
-    const q = F.quadra.value, ls = q === '-' ? [] : lotesDe(q);
-    $('#boxLotes', F).innerHTML = ls.length ? `<div class="lbl">Lotes <span class="muted">(nenhum marcado = custo geral da quadra)</span> <button type="button" class="btn link sm" data-lt="all">Todos</button><button type="button" class="btn link sm" data-lt="none">Limpar</button></div>
-      <div class="chips">${ls.map(l => `<label class="pick"><input type="checkbox" name="lotes" value="${esc(l)}" ${String(def.lote) === String(l) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>` : '';
-    $$('[data-lt]', F).forEach(b => b.onclick = () => { $$('[name=lotes]', F).forEach(c => c.checked = b.dataset.lt === 'all'); recalcParc(); prev(); });
+    const ant = new Set($$('[name=lotes]:checked', F).map(c => c.value)); if (def.lote && def.quadra && !lotesBox.feito) ant.add(def.quadra + '|' + def.lote); lotesBox.feito = true;
+    const qs = qsMarcadas(); F.quadra.value = qs[0] || '-';
+    $('#boxLotes', F).innerHTML = qs.filter(q => lotesDe(q).length).map(q => `<div class="lbl">Lotes da quadra ${esc(q)} <span class="muted">(nenhum = custo geral da quadra)</span> <button type="button" class="btn link sm" data-lt="all" data-q="${esc(q)}">Todos</button><button type="button" class="btn link sm" data-lt="none" data-q="${esc(q)}">Limpar</button></div>
+      <div class="chips">${lotesDe(q).map(l => `<label class="pick"><input type="checkbox" name="lotes" value="${esc(q + '|' + l)}" ${ant.has(q + '|' + l) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>`).join('');
+    $$('[data-lt]', F).forEach(b => b.onclick = () => { $$('[name=lotes]', F).filter(c => c.value.startsWith(b.dataset.q + '|')).forEach(c => c.checked = b.dataset.lt === 'all'); recalcParc(); prev(); });
   };
   const real = () => { $('#boxReal', F).classList.toggle('hidden', !F.realizado.checked); };
   let parc = [];
   const nParc = () => Math.max(1, Math.min(240, parseInt(F.parcelas.value) || 1));
-  const nLotes = () => Math.max(1, $$('[name=lotes]:checked', F).length);
+  const pares = () => { if (F.ambito.value === 'empresa') return [['-', '-']]; const qs = qsMarcadas(); if (!qs.length) return [['-', '-']]; const ls = $$('[name=lotes]:checked', F).map(c => c.value.split('|')); return qs.flatMap(q => { const x = ls.filter(p => p[0] === q); return x.length ? x : [[q, '-']]; }); };
+  const nLotes = () => pares().length;
   const dataBase = i => { const v0 = F.venc.value, iv = F.intervalo.value; if (!v0) return ''; return iv === '7d' ? addDays(v0, 7 * i) : iv === '0.5' ? (i % 2 ? addDays(addMonths(v0, Math.floor(i / 2)), 15) : addMonths(v0, i / 2)) : addMonths(v0, i); };
   const ajustada = d => F.util.checked && d ? proximoDiaUtil(d) : d;
   const notaData = d => { const m = motivoNaoUtil(d); if (!d || !m) return ''; return F.util.checked ? `${m}: vai para ${dCurtoSem(proximoDiaUtil(d))}` : `cai em ${m}`; };
@@ -750,21 +760,21 @@ function formNovo(def = {}) {
   F.addEventListener('change', e => { const nm = e.target.name; if (['intervalo', 'modo', 'lotes'].includes(nm)) recalcParc(); if (nm === 'util') { setPrefUtil(F.util.checked); renderParc(); } });
   const gerar = () => {
     const v = parseBR(F.valor.value); const n = parc.length || 1;
-    const lotes = F.ambito.value === 'empresa' ? [] : $$('[name=lotes]:checked', F).map(c => c.value); const L = lotes.length ? lotes : ['-'];
+    const L = pares();
     const total = L.length * n;
     if (!(v > 0)) return { erro: 'Informe um valor maior que zero.', total };
     if (parc.some(p => !p.d)) return { erro: 'Preencha a data de todas as parcelas.', total };
-    const q = F.quadra.value, base = F.item.value.trim();
+    const base = F.item.value.trim();
     const out = []; const grupo = total > 1 ? uid() : ''; let ajustes = 0;
     for (let i = 0; i < n; i++) {
       const venc = ajustada(parc[i].d); if (venc !== parc[i].d) ajustes++;
       const cents = Math.round((parc[i].v || 0) * 100); const bL = Math.floor(cents / L.length); let rL = cents - bL * L.length;
       const valores = L.map(() => (bL + (rL-- > 0 ? 1 : 0)) / 100); let k = 0;
-      for (const l of L) {
+      for (const [q, l] of L) {
         let item = base + (n > 1 ? ` (${i + 1}/${n})` : '') + (l !== '-' ? ` - ${q} ${l}` : (q !== '-' ? ` - ${q}` : ''));
         const valor = (tipo === 'saida' ? -1 : 1) * valores[k++];
         if (!valor) continue;
-        const t = { id: uid(), item, valor, juros: 0, ...(F.fornCnpj.value ? { fornCnpj: F.fornCnpj.value } : {}), nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
+        const t = { id: uid(), item, valor, juros: 0, ...(F.fornCnpj.value ? { fornCnpj: F.fornCnpj.value } : {}), nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: q !== '-' && E().quadras.includes(q) ? obraDe(q) : obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
         if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
         if (venc !== parc[i].d) t.vencOrig = parc[i].d;
         if (F.etapaObra.value && tipo === 'saida' && F.ambito.value !== 'empresa') t.etapaObra = F.etapaObra.value;
@@ -792,10 +802,12 @@ function formNovo(def = {}) {
     if (!g.lista.length) { p.innerHTML = '<span class="muted">Informe valores maiores que zero.</span>'; return; }
     p.innerHTML = `<b>${g.total} lançamento${g.total > 1 ? 's' : ''}</b>, total <b class="${cls(tot)}">${brl2(tot)}</b>${g.ajustes ? `, ${g.ajustes} vencimento(s) passado(s) para dia útil` : ''}<br><span class="muted">Primeiro: ${esc(g.lista[0].item)}, ${brl2(g.lista[0].valor)}, vence ${dCurtoSem(g.lista[0].venc)}${g.total > 1 ? `. Último vence ${dCurtoSem(g.lista[g.lista.length - 1].venc)}` : ''}</span>`;
   };
-  F.quadra.onchange = () => { if (F.obra && F.quadra.value !== '-') F.obra.value = obraDe(F.quadra.value); sincEmp(F); lotesBox(); recalcParc(); prev(); };
-  if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; lotesBox(); recalcParc(); prev(); } sincEmp(F); };
+  $('#boxQuadras', F).addEventListener('change', () => { lotesBox(); sincEmp(F); recalcParc(); prev(); });
+  if (F.obra) F.obra.onchange = () => { $$('[name=qsel]', F).forEach(c => c.checked = false); F.quadra.value = '-'; quadrasBox(); lotesBox(); recalcParc(); prev(); sincEmp(F); };
+  if (F.obra && def.quadra && def.quadra !== '-') F.obra.value = obraDe(def.quadra);
+  quadrasBox();
   if (F.emp) { F.emp.onchange = () => sincEmp(F); sincEmp(F); }
-  F.ambito.onchange = () => { modoAmbito(F); lotesBox(); recalcParc(); sincEmp(F); prev(); }; modoAmbito(F);
+  F.ambito.onchange = () => { modoAmbito(F); if (F.ambito.value === 'empresa') $$('[name=qsel]', F).forEach(c => c.checked = false); lotesBox(); recalcParc(); sincEmp(F); prev(); }; modoAmbito(F);
   F.destino.addEventListener('change', () => sincAporte(F)); sincAporte(F);
   F.item.addEventListener('change', () => aplicarRegrasForm(F, tipo));
   F.realizado.onchange = () => { real(); prev(); };
@@ -851,7 +863,7 @@ function formNovo(def = {}) {
     e.preventDefault(); if (F.emp && !F.emp.value) { toast('Escolha o CNPJ do lançamento.', 'err'); F.emp.focus(); return; }
     if (ehRec()) {
       const v = parseBR(F.valor.value); if (!(v > 0)) { toast('Informe um valor maior que zero.', 'err'); return; }
-      if ($$('[name=lotes]:checked', F).length) { toast('Conta recorrente não divide por lotes. Desmarque os lotes.', 'err'); return; }
+      if ($$('[name=lotes]:checked', F).length || qsMarcadas().length > 1) { toast('Conta recorrente vale para uma quadra só, sem lotes. Ajuste a seleção.', 'err'); return; }
       if (F.fimRec.value && F.fimRec.value < F.venc.value) { toast('A data final é anterior ao primeiro vencimento.', 'err'); return; }
       const r = { id: uid(), item: F.item.value.trim(), valor: (tipo === 'saida' ? -1 : 1) * r2(v), destino: F.destino.value, forn: F.forn.value.trim(), local: obraDoForm(F), quadra: F.quadra.value, ambito: F.ambito.value === 'empresa' ? 'empresa' : '', ...(secaoDe(F.destino.value) === 'aporte' && F.aporteTipo.value ? { aporteTipo: F.aporteTipo.value } : {}), emp: F.emp ? F.emp.value : '', obs: F.obs.value.trim(), inicio: F.venc.value, passo: +F.freq.value, fim: F.fimRec.value || '', util: F.util.checked, ativo: true, criado: Date.now(), por: S.user?.email || '' };
       salvarRec(r); f.fechar(); gerarRecorrencias(); toast('Conta recorrente criada'); return;
@@ -1365,7 +1377,7 @@ VIEWS.inicio = {
 };
 
 function viewLista(modo) {
-  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', emp: '', obra: '', quadra: '', dest: '', conta: '', ini: '', fim: '' };
+  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', emp: '', obra: '', quadra: '', dest: '', locs: [], dests: [], conta: '', ini: '', fim: '' };
   let selMode = false, limite = 200, agrup = true;
   const per = modo === 'extrato'
     ? [['mes', 'Este mês'], ['mesant', 'Mês passado'], ['30d', 'Últimos 30 dias'], ['ano', 'Este ano'], ['todos', 'Tudo'], ['custom', 'Período…']]
@@ -1375,6 +1387,7 @@ function viewLista(modo) {
     montar(el) {
       listaSel.clear(); selMode = false; limite = 200;
       if (filtroPendente) { Object.assign(F, filtroPendente); filtroPendente = null; }
+      if (F.quadra) { F.locs = ['Q:' + F.quadra]; F.quadra = ''; } if (F.dest) { F.dests = [F.dest]; F.dest = ''; }
       el.innerHTML = `<div class="filtros card">
         <input type="search" id="fq" placeholder="Buscar descrição, fornecedor…" value="${esc(F.q)}">
         ${modo !== 'extrato' ? `<select id="fst">${opts([['aberto', 'Em aberto'], ['pago', modo === 'pagar' ? 'Pagas' : 'Recebidas'], ['todos', 'Todas']], F.st)}</select>` : `<select id="fconta">${opts(E().contas.map(c => c.nome), F.conta, 'Todas as contas')}</select>`}
@@ -1382,13 +1395,13 @@ function viewLista(modo) {
         <span id="fcustom" class="${F.per === 'custom' ? '' : 'hidden'}"><input type="date" id="fini" value="${F.ini}"> até <input type="date" id="ffim" value="${F.fim}"></span>
         ${variasEmpresas() ? `<select id="femp">${opts([...empOpts(), ['__sem', 'Sem CNPJ definido'], ['__div', 'CNPJ diferente da obra']], F.emp, 'Todas as empresas')}</select>` : ''}
         ${variasObras() || S.list.some(ehEmpresa) ? `<select id="fobra">${opts([...E().obras, ['__emp', 'Empresa (fora das obras)']], F.obra, 'Todas as obras')}</select>` : ''}
-        <select id="fquadra">${opts(quadrasOpts().map(([v, l]) => [v, l.replace('Quadra ', '')]), F.quadra, 'Todas as quadras')}</select>
-        <select id="fdest">${opts(todosDestinos(), F.dest, 'Todos os destinos')}</select>
+        ${multiSelLocais('flocs', F.locs, F.obra)}
+        ${multiSel('fdests', 'Todos os destinos', ['op', 'nonop', 'rec', 'aporte'].map(s => [SECAO_NOME[s], (E().destinos[s] || []).map(d => [d, d])]).filter(g => g[1].length), F.dests)}
         <label class="tgl"><input type="checkbox" id="fgrp" ${agrup ? 'checked' : ''}> Agrupar lotes</label>
         <button class="btn" id="bSel">Selecionar</button>
       </div><div id="lsaldo"></div><div class="card"><div id="ltot" class="ltot"></div><div id="lrows" class="tlist"></div><div id="lmore"></div></div><div id="selbar" class="selbar hidden"></div>`;
       const bind = (id, k, ev = 'change') => $('#' + id, el)?.addEventListener(ev, e => { F[k] = e.target.value; limite = 200; if (k === 'per') $('#fcustom', el).classList.toggle('hidden', F.per !== 'custom'); this.refresh(el); });
-      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('femp', 'emp'); bind('fobra', 'obra'); bind('fquadra', 'quadra'); bind('fdest', 'dest');
+      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('femp', 'emp'); bind('fobra', 'obra'); ligarMultiSel(el, 'flocs', v => { F.locs = v; limite = 200; this.refresh(el); }); ligarMultiSel(el, 'fdests', v => { F.dests = v; limite = 200; this.refresh(el); });
       $('#fgrp', el).onchange = e => { agrup = e.target.checked; limite = 200; this.refresh(el); };
       const bs = $('#bSel', el); if (bs) bs.onclick = () => { selMode = !selMode; listaSel.clear(); bs.classList.toggle('on', selMode); bs.textContent = selMode ? 'Cancelar seleção' : 'Selecionar'; this.refresh(el); };
     },
@@ -1410,7 +1423,7 @@ function viewLista(modo) {
         if (modo === 'receber' && !(t.valor > 0)) return false;
         if (st === 'aberto' && pago(t)) return false; if (st === 'pago' && !pago(t)) return false;
         if (F.per === 'vencidas' && pago(t)) return false;
-        if (F.emp === '__sem') { if (empDef(t)) return false; } else if (F.emp === '__div') { if (!empDiverge(t)) return false; } else if (F.emp && empT(t) !== F.emp) return false; if (F.obra === '__emp') { if (!ehEmpresa(t)) return false; } else if (F.obra && obraT(t) !== F.obra) return false; if (F.quadra && t.quadra !== F.quadra) return false; if (F.dest && t.destino !== F.dest) return false;
+        if (F.emp === '__sem') { if (empDef(t)) return false; } else if (F.emp === '__div') { if (!empDiverge(t)) return false; } else if (F.emp && empT(t) !== F.emp) return false; if (F.obra === '__emp') { if (!ehEmpresa(t)) return false; } else if (F.obra && obraT(t) !== F.obra) return false; if (F.locs.length && !casaLocais(t, F.locs)) return false; if (F.dests.length && !F.dests.includes(t.destino)) return false;
         if (F.conta && t.conta !== F.conta) return false;
         if (q && !(t.item.toLowerCase().includes(q) || (t.forn || '').toLowerCase().includes(q) || (t.obs || '').toLowerCase().includes(q) || (t.nfNum || '').includes(q))) return false;
         return okPer(campo === 'pag' ? (t.pag || t.venc) : t.venc);
@@ -1419,7 +1432,7 @@ function viewLista(modo) {
       rows.sort((a, b) => { const x = (campo === 'pag' ? (a.pag || a.venc) : a.venc) || '', y = (campo === 'pag' ? (b.pag || b.venc) : b.venc) || ''; return desc ? y.localeCompare(x) || (b.criado || 0) - (a.criado || 0) : x.localeCompare(y) || (a.criado || 0) - (b.criado || 0); });
       // saldo corrido no extrato
       let saldoMap = null;
-      if (modo === 'extrato' && !q && !F.emp && !F.obra && !F.quadra && !F.dest) {
+      if (modo === 'extrato' && !q && !F.emp && !F.obra && !F.locs.length && !F.dests.length) {
         const sd = saldos(); let s = F.conta ? (E().contas.find(c => c.nome === F.conta)?.inicial || 0) : sum(E().contas, c => +c.inicial || 0);
         const all = S.list.filter(t => pago(t) && (!F.conta || t.conta === F.conta)).sort((a, b) => (a.pag || a.venc || '').localeCompare(b.pag || b.venc || '') || (a.criado || 0) - (b.criado || 0));
         saldoMap = new Map(); for (const t of all) { s += t.valor + (t.juros || 0); saldoMap.set(t.id, s); }
@@ -1539,6 +1552,7 @@ function obraLote(el, q, l) {
   <div class="grid lg"><div class="card"><h2>Viabilidade <span class="hint">projetado = realizado + em aberto</span></h2><div class="tbl-wrap"><table class="tbl">${html}</tbody></table></div></div>
   <div class="card"><h2>Indicadores</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Indicador</th><th>Previsto</th><th>Realizado</th><th>Projetado</th></tr></thead><tbody>${ind.map(([n, k, fm]) => `<tr><td class="l">${n}</td><td>${fm(iP[k])}</td><td class="${typeof iR[k] === 'number' ? cls(iR[k]) : ''}">${fm(iR[k])}</td><td class="${typeof iC[k] === 'number' ? cls(iC[k]) : ''}"><b>${fm(iC[k])}</b></td></tr>`).join('')}</tbody></table></div>
   <p class="muted small">Realizado considera só o que já foi pago/recebido. Enquanto a venda não entra, o resultado realizado fica negativo.</p></div></div>
+  ${cardDadosLote(q, l)}
   <div class="card"><h2>Lançamentos do lote <span class="hint">${ts.length}</span></h2><div class="tlist" id="lotLanc"></div><div id="lotMais"></div></div>`;
   const ord = ts.sort((a, b) => (dataRef(b) || '').localeCompare(dataRef(a) || ''));
   let lim = 25; const pinta = () => { $('#lotLanc', el).innerHTML = ord.slice(0, lim).map(t => linhaTitulo(t, { mostrarPago: true })).join('') || '<p class="muted">Nenhum lançamento.</p>'; $('#lotMais', el).innerHTML = ord.length > lim ? `<button class="btn full" id="bLm">Mostrar todos (${ord.length})</button>` : ''; const b = $('#bLm', el); if (b) b.onclick = () => { lim = 1e9; pinta(); }; };
@@ -1762,7 +1776,7 @@ VIEWS.cadastros = {
     const e = E();
     el.innerHTML = `<div class="grid two">
       <div class="card"><h2>Obras <button class="btn sm rw" data-act="cadObra">Nova obra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Obra</th>${variasEmpresas() ? '<th class="l">Empresa</th>' : ''}<th>Quadras</th><th>Lanç.</th><th></th></tr></thead><tbody>
-        ${e.obras.map(o => `<tr><td class="l"><b>${esc(o)}</b></td>${variasEmpresas() ? `<td class="l">${esc(empRotulo(empPorId(empDaObra(o)), true))}</td>` : ''}<td>${quadrasDaObra(o).length}</td><td>${S.list.filter(x => obraT(x) === o).length}</td><td><button class="btn sm rw" data-act="cadObra" data-o="${esc(o)}">Editar</button></td></tr>`).join('')}</tbody></table></div></div>
+        ${e.obras.map(o => `<tr><td class="l"><b>${esc(o)}</b>${obraLocal(o) ? `<br><span class="muted small">${esc(obraLocal(o))}</span>` : ''}</td>${variasEmpresas() ? `<td class="l">${esc(empRotulo(empPorId(empDaObra(o)), true))}</td>` : ''}<td>${quadrasDaObra(o).length}</td><td>${S.list.filter(x => obraT(x) === o).length}</td><td><button class="btn sm rw" data-act="cadObra" data-o="${esc(o)}">Editar</button></td></tr>`).join('')}</tbody></table></div></div>
       <div class="card"><h2>Contas bancárias <button class="btn sm" data-act="cadConta">Adicionar</button><button class="btn sm" data-act="transferir">Transferir</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Conta</th><th>Saldo inicial</th><th>Saldo atual</th><th></th></tr></thead><tbody>
         ${saldos().contas.map(c => { const cd = e.contas.find(x => x.nome === c.nome) || {}; return { ...c, cd }; }).map(c => `<tr><td class="l"><b>${esc(c.nome)}</b>${c.cd.num ? `<br><span class="muted small">${esc([c.cd.banco, c.cd.ag ? 'ag. ' + c.cd.ag : '', 'cc ' + c.cd.num].filter(Boolean).join(' · '))}</span>` : `<br><span class="small" style="color:var(--warn)">sem número da conta</span>`}${variasEmpresas() ? `<br><span class="muted small">${esc(empRotulo(empPorId(empConta(c.nome)), true))}</span>` : ''}</td><td>${brl2(c.inicial)}</td><td class="${cls(c.saldo)}">${brl2(c.saldo)}</td><td>${e.contas.some(x => x.nome === c.nome) ? `<button class="btn sm" data-act="cadConta" data-nome="${esc(c.nome)}">Editar</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>
     </div>
@@ -1824,9 +1838,14 @@ ACOES.cadEmp = d => {
 ACOES.cadObra = d => {
   const o = d.o; const e = E();
   const nQ = o ? quadrasDaObra(o).length : 0, nT = o ? S.list.filter(x => obraT(x) === o).length : 0;
-  const pode = o && e.obras.length > 1 && !nQ && !nT;
+  const pode = o && e.obras.length > 1 && !nQ && !nT; const oi = (o && e.obraInfo[o]) || {};
   const f = folha(o ? 'Obra ' + o : 'Nova obra', `<form class="form" id="fx"><label>Nome da obra (local)<input name="v" value="${esc(o || '')}" required placeholder="Ex.: Araripina"></label>
     ${variasEmpresas() ? `<label>Empresa (CNPJ) da obra<select name="emp">${opts(empOpts(), o ? empDaObra(o) : matrizId())}</select></label>` : ''}
+    <div class="g3"><label>Cidade<input name="cidade" value="${esc(oi.cidade || '')}" placeholder="Ex.: Petrolina"></label><label>UF<input name="uf" maxlength="2" value="${esc(oi.uf || '')}" placeholder="PE" style="text-transform:uppercase"></label><label>CEP<input name="cep" inputmode="numeric" value="${esc(oi.cep || '')}"></label></div>
+    <label>Endereço / localização do empreendimento<input name="endereco" value="${esc(oi.endereco || '')}" placeholder="Ex.: Loteamento Nova Juazeiro, Rod. BR-407 km 3"></label>
+    <div class="g2"><label>Construtor responsável<input name="construtor" list="dlConstr" value="${esc(oi.construtor || '')}" placeholder="Empresa ou empreiteiro"></label><label>Matrícula da gleba / loteamento<input name="matricula" value="${esc(oi.matricula || '')}"></label></div>
+    <div class="g2"><label>Cartório de registro<input name="cartorio" value="${esc(oi.cartorio || '')}"></label><label>Mapa (link ou coordenadas)<input name="mapa" value="${esc(oi.mapa || '')}" placeholder="-9.39, -40.50 ou link do Google Maps"></label></div>
+    <datalist id="dlConstr">${construtores().map(x => `<option value="${esc(x)}">`).join('')}</datalist>
     ${o ? `<p class="muted small">${nQ} quadra(s) e ${nT} lançamento(s) nesta obra. Ao renomear, os lançamentos passam a usar o novo nome.${e.obras.length > 1 && !pode ? ' Para remover, a obra não pode ter quadras nem lançamentos.' : ''}</p>` : '<p class="muted small">Depois de criar, cadastre as quadras e lotes dela em Quadras e lotes, escolhendo esta obra.</p>'}
     <div class="acts">${pode ? '<button type="button" class="btn danger ghost" id="rm">Remover obra</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fx');
@@ -1842,6 +1861,8 @@ ACOES.cadObra = d => {
     }
     if (o && nome !== o && n.obraEmpresa[o]) { n.obraEmpresa[nome] = n.obraEmpresa[o]; delete n.obraEmpresa[o]; }
     if (F.emp) n.obraEmpresa[nome] = F.emp.value;
+    n.obraInfo = { ...(n.obraInfo || {}) }; if (o && nome !== o) delete n.obraInfo[o];
+    n.obraInfo[nome] = { cidade: F.cidade.value.trim(), uf: F.uf.value.trim().toUpperCase(), cep: F.cep.value.trim(), endereco: F.endereco.value.trim(), construtor: F.construtor.value.trim(), matricula: F.matricula.value.trim(), cartorio: F.cartorio.value.trim(), mapa: F.mapa.value.trim() };
     n.local = n.obras[0]; salvarEstrutura(n); f.fechar(); toast(o ? 'Obra salva' : 'Obra criada');
   };
   const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { const n = clone(E()); n.obras = n.obras.filter(x => x !== o); n.local = n.obras[0]; salvarEstrutura(n); f.fechar(); };
@@ -1924,15 +1945,16 @@ function formVenda(k) {
     <div class="resumo"><div class="g3"><div><span class="muted small">Recebido</span><div class="pos"><b>${brl(x.rec)}</b></div></div><div><span class="muted small">A receber</span><div><b>${brl(x.aberto)}</b></div></div><div><span class="muted small">Próximo vencimento</span><div><b>${x.prox ? dBR(x.prox) : '—'}</b></div></div></div></div>
     <div class="g2"><label>Etapa<select name="etapa">${opts(ETAPAS_V.map(e => [e[0], e[1]]), x.etapa)}</select></label><label>Desde<input type="date" name="data" value="${esc(v.data || hoje())}"></label></div>
     <div class="g2"><label>Cliente<input name="cliente" value="${esc(v.cliente || '')}" autocomplete="off"></label><label>Telefone<input name="tel" type="tel" value="${esc(v.tel || '')}"></label></div>
-    <label>Correspondente / agência<input name="corresp" value="${esc(v.corresp || '')}" list="dlCorr"></label>
+    <div class="g2"><label>Corretor <span class="muted">(vazio = venda direta)</span><input name="corretor" value="${esc(v.corretor || '')}" list="dlCorretor" placeholder="Nome do corretor"></label><label>Imobiliária / CRECI<input name="imob" value="${esc(v.imob || '')}" list="dlImob"></label></div>
+    <div class="g2"><label>Correspondente bancário<input name="corresp" value="${esc(v.corresp || '')}" list="dlCorr"></label><label>Agência do financiamento<input name="agencia" value="${esc(v.agencia || '')}" list="dlAg" placeholder="Ex.: Caixa ag. 0812 Petrolina"></label></div>
     <label>Observação<textarea name="obs" rows="2">${esc(v.obs || '')}</textarea></label>
-    <datalist id="dlCorr">${[...new Set(Object.values((S.vendas && S.vendas.lotes) || {}).map(o => o.corresp).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+    ${['corresp:dlCorr', 'corretor:dlCorretor', 'imob:dlImob', 'agencia:dlAg'].map(s => { const [c, id] = s.split(':'); return `<datalist id="${id}">${[...new Set(Object.values((S.vendas && S.vendas.lotes) || {}).map(o => o[c]).filter(Boolean))].map(x => `<option value="${esc(x)}">`).join('')}</datalist>`; }).join('')}
     ${hist.length ? `<div class="lbl">Histórico</div><div class="tlist small">${hist.map(hh => `<div class="kv"><span>${dBR(hh.data)}</span><b>${esc(etapaNome(hh.etapa))}</b></div>`).join('')}</div>` : ''}
     <div class="acts left rw"><button type="button" class="btn" id="vPl">${v.plano ? 'Plano de pagamento' : 'Criar plano de pagamento'}</button><button type="button" class="btn" id="vPo">${v.portal ? 'Link do cliente' : 'Gerar link para o cliente'}</button></div>
     <div class="acts"><a class="btn" href="#/obras/${encodeURIComponent(q)}/${encodeURIComponent(l)}" data-close>Ver lançamentos do lote</a><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary rw">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fV');
   const guardar = () => {
-    const novo = { ...v, etapa: F.etapa.value, data: F.data.value, cliente: F.cliente.value.trim(), tel: F.tel.value.trim(), corresp: F.corresp.value.trim(), obs: F.obs.value.trim(), hist: v.hist || [] };
+    const novo = { ...v, etapa: F.etapa.value, data: F.data.value, cliente: F.cliente.value.trim(), tel: F.tel.value.trim(), corresp: F.corresp.value.trim(), corretor: F.corretor.value.trim(), imob: F.imob.value.trim(), agencia: F.agencia.value.trim(), obs: F.obs.value.trim(), hist: v.hist || [] };
     if (novo.etapa !== v.etapa) novo.hist = [...novo.hist, { etapa: novo.etapa, data: novo.data }];
     S.vendas = S.vendas || { lotes: {} }; S.vendas.lotes = { ...(S.vendas.lotes || {}), [k]: novo };
     gravar(doc(db, 'config', 'vendas'), { lotes: { [k]: novo } }, { merge: true }).catch(onErroEscrita);
@@ -3009,8 +3031,8 @@ async function baixarArquivo(blob, nome) {
 }
 async function exportarExcel(baixar = true) {
   await carregarLib('xlsx');
-  const cab = ['Item', 'R$', 'Juros e Multa', 'NF', 'Local', 'Quadra', 'Lote', 'Destino', 'Data', 'Vencimento', 'Conta', 'Fornecedor', 'Observação', 'Quantidade', 'Unidade', 'Nº NF', 'Anexo (Drive)', 'Empresa', 'CNPJ', 'Conferência CNPJ'];
-  const lin = t => [t.item, t.valor, t.juros || 0, !!t.nf, t.local || E().local, t.quadra, isNaN(+t.lote) || t.lote === '' ? t.lote : +t.lote, t.destino, pago(t) ? (t.pag || t.venc) : t.venc, t.venc, t.conta || '', t.forn || '', t.obs || '', t.qtd || '', t.unid || '', t.nfNum || '', anexosDe(t).map(a => a.link).filter(Boolean).join(' '), empPorId(empT(t))?.nome || '', fCnpj(empPorId(empT(t))?.cnpj || ''), !variasEmpresas() ? '' : empDiverge(t) ? 'diferente da obra' : empDef(t) ? 'ok' : 'não definido'];
+  const cab = ['Item', 'R$', 'Juros e Multa', 'NF', 'Local', 'Quadra', 'Lote', 'Destino', 'Data', 'Vencimento', 'Conta', 'Fornecedor', 'Observação', 'Quantidade', 'Unidade', 'Nº NF', 'Anexo (Drive)', 'Empresa', 'CNPJ', 'Conferência CNPJ', 'Pertence a', 'Tipo de aporte', 'Etapa da obra', 'Contrato'];
+  const lin = t => [t.item, t.valor, t.juros || 0, !!t.nf, t.local || E().local, t.quadra, isNaN(+t.lote) || t.lote === '' ? t.lote : +t.lote, t.destino, pago(t) ? (t.pag || t.venc) : t.venc, t.venc, t.conta || '', t.forn || '', t.obs || '', t.qtd || '', t.unid || '', t.nfNum || '', anexosDe(t).map(a => a.link).filter(Boolean).join(' '), empPorId(empT(t))?.nome || '', fCnpj(empPorId(empT(t))?.cnpj || ''), !variasEmpresas() ? '' : empDiverge(t) ? 'diferente da obra' : empDef(t) ? 'ok' : 'não definido', ehEmpresa(t) ? 'Empresa' : 'Obra', t.aporteTipo ? tipoAporteNome(t.aporteTipo) : '', t.etapaObra || '', t.contrato ? ((S.contratos || []).find(c => c.id === t.contrato) || {}).forn || t.contrato : ''];
   const toDate = r => { for (const i of [8, 9]) if (r[i]) { const [y, m, d] = r[i].split('-').map(Number); r[i] = new Date(Date.UTC(y, m - 1, d)); } return r; };
   const sheet = rows => { const ws = XLSX.utils.aoa_to_sheet([cab, ...rows.map(lin).map(toDate)], { cellDates: true }); ws['!cols'] = [{ wch: 44 }, { wch: 14 }, { wch: 12 }, { wch: 5 }, { wch: 14 }, { wch: 7 }, { wch: 6 }, { wch: 16 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 20 }, { wch: 24 }]; return ws; };
   const wb = XLSX.utils.book_new();
@@ -3022,6 +3044,7 @@ async function exportarExcel(baixar = true) {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Destino (por lote)', ...qs], ...ds.map(d => [d, ...qs.map(q => +(S.orcamento?.quadras?.[q]?.[d] || 0))])]), 'Previsto');
   const docs = (S.checklist && S.checklist.docs) || DOCS_PADRAO;
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Local', 'Quadra', 'Lote', ...docs], ...qs.flatMap(q => lotesDe(q).map(l => { const s = S.checklist?.lotes?.[q + '|' + l] || ''; return [E().local, q, l, ...docs.map((_, i) => s[i] === '1')]; }))]), 'Checklist');
+  try { abasCadastro(wb); } catch (e) { console.warn(e); }
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   if (baixar) baixarArquivo(blob, `SFG Financeiro ${hoje()}.xlsx`);
@@ -3091,6 +3114,7 @@ function lerExportacao(rows, s, isNum, dt, base) {
     if (isNum(r[13]) && r[13] > 0) { t.qtd = r[13]; t.unid = s(r[14]); }
     if (s(r[15])) t.nfNum = s(r[15]); if (s(r[16])) t.anexoLink = s(r[16]);
     if (status === 'pago') { t.pag = dt(r[8]) || venc; t.conta = s(r[10]) || 'BTG'; }
+    if (s(r[20]) === 'Empresa') { t.ambito = 'empresa'; t.local = ''; } { const ta = TIPOS_APORTE.find(x => x[1] === s(r[21])); if (ta) t.aporteTipo = ta[0]; } if (s(r[22])) t.etapaObra = s(r[22]);
     titulos.push(t);
   });
   ledger('Extrato', 'pago'); ledger('Contas a Pagar', 'aberto'); ledger('Contas a Receber', 'aberto');

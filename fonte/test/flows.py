@@ -20,8 +20,8 @@ async def main():
     # Novo: 10 parcelas x 3 lotes K3
     await pg.click('.top [data-act=novo]'); await pg.wait_for_timeout(300)
     await pg.fill('#fNovo [name=item]','Cimento Votoran'); await pg.fill('#fNovo [name=forn]','Mendonça'); await pg.select_option('#fNovo [name=destino]','Material')
-    await pg.fill('#fNovo [name=valor]','3.000,00'); await pg.select_option('#fNovo [name=quadra]','K3'); await pg.wait_for_timeout(100)
-    for l in ['19','20','21']: await pg.click(f'#fNovo .pick:has(input[value="{l}"])')
+    await pg.fill('#fNovo [name=valor]','3.000,00'); await pg.click('#boxQuadras .pick:has(input[value="K3"])'); await pg.wait_for_timeout(100)
+    for l in ['19','20','21']: await pg.click(f'#boxLotes .pick:has(input[value$="|{l}"])')
     await pg.fill('#fNovo [name=venc]','2026-11-10'); await pg.fill('#fNovo [name=parcelas]','10'); await pg.wait_for_timeout(200)
     print('preview:', (await pg.inner_text('#prevNovo')).replace('\n',' | '))
     await pg.screenshot(path=OUT+'/11_novo.png')

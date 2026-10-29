@@ -56,8 +56,8 @@ async def main():
     for d,(qt,val) in [('2026-11-10',(200,'7.000,00')),('2026-12-10',(200,'7.400,00'))]:
         await pg.click('.top [data-act=novo]'); await pg.wait_for_timeout(200)
         await pg.fill('#fNovo [name=item]','Cimento CP-II'); await pg.fill('#fNovo [name=forn]','Mendonça'); await pg.fill('#fNovo [name=valor]',val); await pg.fill('#fNovo [name=venc]',d)
-        await pg.select_option('#fNovo [name=quadra]','H3'); await pg.wait_for_timeout(100)
-        for l in ['1','2']: await pg.click(f'#fNovo .pick:has(input[value="{l}"])')
+        await pg.click('#boxQuadras .pick:has(input[value="H3"])'); await pg.wait_for_timeout(100)
+        for l in ['1','2']: await pg.click(f'#boxLotes .pick:has(input[value$="|{l}"])')
         await pg.fill('#fNovo [name=qtd]',str(qt)); await pg.fill('#fNovo [name=unid]','sc'); await pg.click('#fNovo button[type=submit]'); await pg.wait_for_timeout(400)
     await pg.goto(URL+'#/fornecedores'); await pg.wait_for_timeout(400)
     await pg.click('[data-act=forn][data-n="Mendonça"]'); await pg.wait_for_timeout(500)

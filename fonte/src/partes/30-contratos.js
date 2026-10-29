@@ -21,11 +21,11 @@ function resumoContrato(c) {
   return { ts, contratado, medido, retido, pago: pg || 0, aPagar: aPagar || 0, avulso, saldo: contratado - medido - avulso, pct: contratado ? (medido + avulso) / contratado : null, fisico };
 }
 function titulosMedicao(c, m, venc, valorLiq, quadra, ratear, emp, extra) {
-  const L = quadra && quadra !== '-' && ratear ? lotesDe(quadra) : ['-'];
+  const L = quadra === '__lotes' && (c.lotes || []).length ? c.lotes.map(k => k.split('|')) : quadra && quadra !== '-' && quadra !== '__lotes' && ratear ? lotesDe(quadra).map(l => [quadra, l]) : [[quadra && quadra !== '__lotes' ? quadra : '-', '-']];
   const cents = Math.round(valorLiq * 100), b = Math.floor(cents / L.length); let r = cents - b * L.length; const grupo = uid();
-  return L.map(l => {
+  return L.map(([qq, l]) => {
     const v = (b + (r-- > 0 ? 1 : 0)) / 100;
-    const t = { id: uid(), item: `${extra.titulo} - ${c.forn}${quadra && quadra !== '-' ? ` - ${quadra}${l !== '-' ? ' ' + l : ''}` : ''}`, valor: -v, juros: 0, nf: 0, nfNum: '', local: quadra && quadra !== '-' ? obraDe(quadra) : (c.obra || E().obras[0]), quadra: quadra || '-', lote: l, destino: c.destino || 'Mão de Obra', venc, status: 'aberto', forn: c.forn, obs: extra.obs || '', grupo, contrato: c.id, criado: Date.now() };
+    const t = { id: uid(), item: `${extra.titulo} - ${c.forn}${qq !== '-' ? ` - ${qq}${l !== '-' ? ' ' + l : ''}` : ''}`, valor: -v, juros: 0, nf: 0, nfNum: '', local: qq !== '-' ? obraDe(qq) : (c.obra || E().obras[0]), quadra: qq, lote: l, destino: c.destino || 'Mão de Obra', venc, status: 'aberto', forn: c.forn, obs: extra.obs || '', grupo, contrato: c.id, criado: Date.now() };
     if (extra.medicao) t.medicao = extra.medicao; if (extra.liberacao) t.liberacao = extra.liberacao; if (emp) t.emp = emp;
     return t;
   }).filter(t => t.valor);
@@ -36,29 +36,34 @@ VIEWS.contratos = {
     const cs = contratos(); const rs = cs.map(c => ({ c, r: resumoContrato(c) })); const at = rs.filter(x => x.c.status !== 'encerrado');
     const T = k => sum(at, x => x.r[k]);
     el.innerHTML = `<div class="grid kpis k4">${kpi('Contratado (ativos)', brl(T('contratado')), at.length + ' contrato(s)', '')}${kpi('Medido', brl(T('medido')), T('contratado') ? fPct.format(T('medido') / T('contratado')) + ' do contratado' : '', '')}${kpi('Retenção acumulada', brl(T('retido')), 'a liberar no fim', '')}${kpi('Saldo a medir', brl(T('saldo')), '', '')}</div>
-      <div class="card"><h2>Contratos de empreiteiros <button class="btn sm primary rw" data-act="ctNovo">Novo contrato</button></h2>
+      <div class="card"><h2>Contratos de empreiteiros <button class="btn sm rw" data-act="ctImport">Importar planilha do empreiteiro</button><button class="btn sm primary rw" data-act="ctNovo">Novo contrato</button></h2>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Empreiteiro</th><th class="l">Objeto</th><th>Contratado</th><th class="l">Andamento</th><th>Pago</th><th>A pagar</th><th>Retido</th><th>Saldo</th></tr></thead><tbody>
       ${rs.map(({ c, r }) => `<tr class="click" data-act="ctAbrir" data-id="${esc(c.id)}"><td class="l"><b>${esc(c.forn)}</b>${c.status === 'encerrado' ? ' <span class="chip">encerrado</span>' : ''}<br><span class="muted small">${esc((c.quadras || []).join(', ') || c.obra || '')}</span></td><td class="l wrap">${esc(c.objeto || '')}</td><td>${brl(r.contratado)}</td><td class="l">${pctBar(r.pct)}${r.fisico !== null ? `<small class="muted">físico ${fPct.format(r.fisico / 100)}</small>` : ''}</td><td class="neg">${brl(-r.pago)}</td><td>${brl(-r.aPagar)}</td><td>${brl(r.retido)}</td><td class="${r.saldo < 0 ? 'neg' : ''}">${brl(r.saldo)}</td></tr>`).join('') || '<tr><td class="l muted" colspan="8">Nenhum contrato. Cadastre o contrato de cada empreiteiro para controlar medições, retenção e saldo.</td></tr>'}</tbody></table></div>
       <p class="muted small">Cada medição gera a conta a pagar do valor medido menos a retenção. A retenção acumulada vira conta a pagar quando você a libera. Pagamentos antigos do empreiteiro podem ser vinculados ao contrato.</p></div>`;
   }
 };
 ACOES.ctNovo = () => formContrato(null);
-function formContrato(c) {
+function formContrato(c, pre) {
+  const B = c || pre || null;
   const fs = [...new Set([...S.list.filter(t => t.valor < 0).map(t => t.forn), ...Object.keys((S.fornecedores && S.fornecedores.lista) || {})].filter(Boolean))].sort();
   const f = folha(c ? 'Editar contrato' : 'Novo contrato', `<form class="form" id="fx">
-    <div class="g2"><label>Empreiteiro<input name="forn" list="dlFC" required value="${esc(c?.forn || '')}"><datalist id="dlFC">${fs.map(x => `<option value="${esc(x)}">`).join('')}</datalist></label><label>Objeto<input name="objeto" required value="${esc(c?.objeto || '')}" placeholder="Ex.: mão de obra completa das casas"></label></div>
-    <div class="g2"><label>Valor contratado (R$)<input name="valor" inputmode="decimal" required value="${c ? fNum2.format(c.valor || 0) : ''}"></label><label>Retenção técnica (%)<input name="ret" inputmode="decimal" value="${c ? String(c.retPct || 0).replace('.', ',') : '5'}"></label></div>
-    <div class="g2"><label>Início<input type="date" name="inicio" value="${esc(c?.inicio || hoje())}"></label><label>Término previsto<input type="date" name="fim" value="${esc(c?.fim || '')}"></label></div>
-    <label>Destino dos pagamentos<select name="destino">${optsDestino(c?.destino || 'Mão de Obra')}</select></label>
-    ${campoObra(c?.obra || '', c?.emp || '')}
-    <div class="lbl">Quadras atendidas</div><div class="chips">${E().quadras.map(q => `<label class="chip"><input type="checkbox" name="qs" value="${esc(q)}" ${(c?.quadras || []).includes(q) ? 'checked' : ''}> ${esc(q)}</label>`).join('')}</div>
-    <label>Observação<input name="obs" value="${esc(c?.obs || '')}"></label>
+    <div class="g2"><label>Empreiteiro<input name="forn" list="dlFC" required value="${esc(B?.forn || '')}"><datalist id="dlFC">${fs.map(x => `<option value="${esc(x)}">`).join('')}</datalist></label><label>Objeto<input name="objeto" required value="${esc(B?.objeto || '')}" placeholder="Ex.: mão de obra completa das casas"></label></div>
+    <div class="g2"><label>Valor contratado (R$)<input name="valor" inputmode="decimal" required value="${B ? fNum2.format(B.valor || 0) : ''}"></label><label>Retenção técnica (%)<input name="ret" inputmode="decimal" value="${B && B.retPct !== undefined ? String(B.retPct || 0).replace('.', ',') : '5'}"></label></div>
+    <div class="g2"><label>Início<input type="date" name="inicio" value="${esc(B?.inicio || hoje())}"></label><label>Término previsto<input type="date" name="fim" value="${esc(B?.fim || '')}"></label></div>
+    <label>Destino dos pagamentos<select name="destino">${optsDestino(B?.destino || 'Mão de Obra')}</select></label>
+    ${campoObra(B?.obra || '', B?.emp || '')}
+    <div class="lbl">Quadras atendidas</div><div class="chips">${E().quadras.map(q => `<label class="chip"><input type="checkbox" name="qs" value="${esc(q)}" ${(B?.quadras || []).includes(q) ? 'checked' : ''}> ${esc(q)}</label>`).join('')}</div>
+    <div id="ctLotes"></div>
+    <label>Observação<input name="obs" value="${esc(B?.obs || '')}"></label>
     <div class="acts">${c ? `<button type="button" class="btn ghost" id="enc">${c.status === 'encerrado' ? 'Reabrir' : 'Encerrar contrato'}</button>` : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`, { largo: true });
   const F = f.el.querySelector('#fx');
   if (F.emp && !c) F.emp.querySelector('option').textContent = 'CNPJ que contrata…';
+  const lotesCt = () => { const marc = new Set([...$$('[name=lts]:checked', F).map(x => x.value), ...(lotesCt.ini ? [] : (B?.lotes || []))]); lotesCt.ini = true; const qs = $$('[name=qs]:checked', F).map(x => x.value);
+    $('#ctLotes', F).innerHTML = qs.length ? `<div class="lbl">Lotes do contrato <span class="muted">(opcional: as medições são divididas só entre eles; nenhum = a quadra toda)</span></div>${qs.map(q => `<div class="chips"><span class="muted small" style="align-self:center">${esc(q)}</span>${lotesDe(q).map(l => `<label class="pick"><input type="checkbox" name="lts" value="${esc(q + '|' + l)}" ${marc.has(q + '|' + l) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>`).join('')}` : ''; };
+  F.addEventListener('change', e => { if (e.target.name === 'qs') lotesCt(); }); lotesCt();
   F.onsubmit = e => {
     e.preventDefault(); const v = parseBR(F.valor.value); if (!(v > 0)) { toast('Informe o valor do contrato.', 'err'); return; }
-    const n = { ...(c || { id: 'ct' + uid(), medicoes: [], aditivos: [], liberacoes: [], status: 'ativo', criado: Date.now(), por: S.user?.email || '' }), forn: F.forn.value.trim(), objeto: F.objeto.value.trim(), valor: r2(v), retPct: parseBR(F.ret.value) || 0, inicio: F.inicio.value, fim: F.fim.value, destino: F.destino.value, obra: F.obra ? F.obra.value : E().obras[0], emp: F.emp ? F.emp.value : '', quadras: $$('[name=qs]:checked', F).map(x => x.value), obs: F.obs.value.trim() };
+    const n = { ...(c || { id: 'ct' + uid(), medicoes: [], aditivos: [], liberacoes: [], status: 'ativo', criado: Date.now(), por: S.user?.email || '', ...(pre ? { planilha: pre.planilha, medicoes: pre.medicoes || [], banco: pre.banco || '', pix: pre.pix || '' } : {}) }), forn: F.forn.value.trim(), objeto: F.objeto.value.trim(), valor: r2(v), retPct: parseBR(F.ret.value) || 0, inicio: F.inicio.value, fim: F.fim.value, destino: F.destino.value, obra: F.obra ? F.obra.value : E().obras[0], emp: F.emp ? F.emp.value : '', quadras: $$('[name=qs]:checked', F).map(x => x.value), lotes: $$('[name=lts]:checked', F).map(x => x.value), obs: F.obs.value.trim() };
     salvarContrato(n); f.fechar(); toast('Contrato salvo'); ACOES.ctAbrir({ id: n.id });
   };
   const enc = F.querySelector('#enc'); if (enc) enc.onclick = () => { salvarContrato({ ...c, status: c.status === 'encerrado' ? 'ativo' : 'encerrado' }); f.fechar(); refreshView(); };
@@ -67,37 +72,40 @@ ACOES.ctAbrir = d => {
   const c = contratoPorId(d.id); if (!c) return; const r = resumoContrato(c);
   const meds = (c.medicoes || []).slice().sort((a, b) => a.n - b.n);
   const f = folha(`${c.forn} · ${c.objeto || 'contrato'}`, `<div class="grid kpis k4">${kpi('Contratado', brl(r.contratado), (c.aditivos || []).length ? (c.aditivos.length + ' aditivo(s)') : 'sem aditivos', '')}${kpi('Medido', brl(r.medido), r.pct !== null ? fPct.format(r.pct) + (r.fisico !== null ? ` · físico ${fPct.format(r.fisico / 100)}` : '') : '', r.fisico !== null && r.pct * 100 > r.fisico + 10 ? 'neg' : '')}${kpi('Retido', brl(r.retido), c.retPct ? c.retPct + '% por medição' : 'sem retenção', '')}${kpi('Saldo a medir', brl(r.saldo), r.avulso ? 'inclui ' + brl(r.avulso) + ' de pagamentos vinculados' : '', r.saldo < 0 ? 'neg' : '')}</div>
-    <div class="acts left rw"><button class="btn primary" id="cM">Nova medição</button><button class="btn" id="cA">Aditivo</button>${r.retido > 0.5 ? '<button class="btn" id="cR">Liberar retenção</button>' : ''}<button class="btn" id="cV">Vincular pagamentos</button><button class="btn ghost" id="cE">Editar contrato</button></div>
+    <div class="acts left rw"><button class="btn primary" id="cM">Nova medição</button><button class="btn" id="cA">Aditivo</button>${r.retido > 0.5 ? '<button class="btn" id="cR">Liberar retenção</button>' : ''}<button class="btn" id="cV">Vincular pagamentos</button><button class="btn" id="cP">${c.planilha ? 'Reimportar planilha' : 'Importar planilha'}</button><button class="btn ghost" id="cE">Editar contrato</button></div>
+    ${(c.lotes || []).length ? `<p class="muted small">Lotes: ${esc(c.lotes.map(k => k.replace('|', ' ')).join(', '))}${c.banco || c.pix ? ' · ' : ''}${esc([c.banco, c.pix ? 'PIX ' + c.pix : ''].filter(Boolean).join(' · '))}</p>` : c.banco || c.pix ? `<p class="muted small">${esc([c.banco, c.pix ? 'PIX ' + c.pix : ''].filter(Boolean).join(' · '))}</p>` : ''}
+    ${c.planilha ? quadroPlanilha(c) : ''}
     <div class="lbl" style="margin-top:12px">Medições</div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Nº</th><th class="l">Data</th><th class="l">Referência</th><th>Bruto</th><th>Retenção</th><th>Líquido</th><th>Físico</th><th class="l">Situação</th><th></th></tr></thead><tbody>
-    ${meds.map(m => { const ts = S.list.filter(t => t.medicao === m.id); const pg = ts.length && ts.every(pago); return `<tr><td class="l">${m.n}</td><td class="l">${dBR(m.data)}</td><td class="l wrap">${esc(m.ref || '')}${m.quadra && m.quadra !== '-' ? ` <span class="muted small">· ${esc(m.quadra)}</span>` : ''}</td><td>${brl2(m.valor)}</td><td>${brl2(m.ret || 0)}</td><td>${brl2(m.valor - (m.ret || 0))}</td><td>${m.fisico ? fPct.format(m.fisico / 100) : '—'}</td><td class="l"><span class="chip ${pg ? 'ok' : ''}">${pg ? 'paga' : ts.some(pago) ? 'paga em parte' : 'a pagar, vence ' + dBR(m.venc)}</span></td><td>${ts.some(pago) ? '' : `<button class="btn sm danger ghost rw" data-mdel="${esc(m.id)}">Excluir</button>`}</td></tr>`; }).join('') || '<tr><td class="l muted" colspan="9">Nenhuma medição ainda.</td></tr>'}</tbody></table></div>
+    ${meds.map(m => { const ts = S.list.filter(t => t.medicao === m.id); const pg = ts.length && ts.every(pago); return `<tr><td class="l">${m.n}</td><td class="l">${m.data ? dBR(m.data) : '—'}</td><td class="l wrap">${esc(m.ref || '')}${m.quadra && m.quadra !== '-' ? ` <span class="muted small">· ${esc(m.quadra)}</span>` : ''}</td><td>${brl2(m.valor)}</td><td>${brl2(m.ret || 0)}</td><td>${brl2(m.valor - (m.ret || 0))}</td><td>${m.fisico ? fPct.format(m.fisico / 100) : '—'}</td><td class="l"><span class="chip ${pg ? 'ok' : ''}">${m.importada && !ts.length ? 'importada da planilha' : pg ? 'paga' : ts.some(pago) ? 'paga em parte' : 'a pagar, vence ' + dBR(m.venc)}</span></td><td>${ts.some(pago) ? '' : `<button class="btn sm danger ghost rw" data-mdel="${esc(m.id)}">Excluir</button>`}</td></tr>`; }).join('') || '<tr><td class="l muted" colspan="9">Nenhuma medição ainda.</td></tr>'}</tbody></table></div>
     ${(c.aditivos || []).length ? `<div class="lbl">Aditivos</div><ul class="lista-simples">${c.aditivos.map(a => `<li>${dBR(a.d)} · ${brl2(a.valor)} · ${esc(a.desc || '')}</li>`).join('')}</ul>` : ''}
     ${(c.liberacoes || []).length ? `<div class="lbl">Retenção liberada</div><ul class="lista-simples">${c.liberacoes.map(a => `<li>${dBR(a.data)} · ${brl2(a.valor)}</li>`).join('')}</ul>` : ''}
     ${r.ts.filter(t => !t.medicao && !t.liberacao).length ? `<div class="lbl">Pagamentos vinculados sem medição</div><div class="tlist">${r.ts.filter(t => !t.medicao && !t.liberacao).slice(0, 30).map(t => linhaTitulo(t, { mostrarPago: true })).join('')}</div>` : ''}`, { largo: true });
   const on = (id, fn) => { const b = f.el.querySelector('#' + id); if (b) b.onclick = () => { f.fechar(); fn(); }; };
-  on('cM', () => formMedicao(c)); on('cA', () => formAditivo(c)); on('cR', () => formLiberar(c)); on('cV', () => vincularContrato(c)); on('cE', () => formContrato(c));
+  on('cM', () => formMedicao(c)); on('cA', () => formAditivo(c)); on('cR', () => formLiberar(c)); on('cV', () => vincularContrato(c)); on('cE', () => formContrato(c)); on('cP', () => importarPlanilhaEmpreiteiro(c));
   $$('[data-mdel]', f.el).forEach(b => b.onclick = async () => { const m = meds.find(x => x.id === b.dataset.mdel); if (!(await confirmar(`Excluir a medição ${m.n} e as contas a pagar dela?`, 'Excluir'))) return; excluirTitulos(S.list.filter(t => t.medicao === m.id).map(t => t.id)); salvarContrato({ ...c, medicoes: c.medicoes.filter(x => x.id !== m.id) }); f.fechar(); ACOES.ctAbrir(d); });
   f.el.addEventListener('click', e => { if (e.target.closest('[data-act="abrir"]')) f.fechar(); });
 };
 function formMedicao(c) {
   const r = resumoContrato(c); const n = Math.max(0, ...(c.medicoes || []).map(m => m.n || 0)) + 1;
-  const qs = (c.quadras || []).length ? c.quadras : ['-'];
+  const qs = [...((c.lotes || []).length ? ['__lotes'] : []), ...((c.quadras || []).length ? c.quadras : ['-'])];
   const f = folha(`Medição ${n} · ${c.forn}`, `<form class="form" id="fx"><p class="muted small">Contratado ${brl2(r.contratado)} · já medido ${brl2(r.medido)} · saldo ${brl2(r.saldo)}</p>
     <div class="g2"><label>Data da medição<input type="date" name="data" value="${hoje()}" required></label><label>Referência<input name="ref" placeholder="Ex.: 2ª quinzena de outubro, alvenaria"></label></div>
     <div class="g3"><label>Valor medido (R$)<input name="valor" inputmode="decimal" required></label><label>ou % do contrato<input name="pct" inputmode="decimal" placeholder="Ex.: 10"></label><label>Físico acumulado (%)<input name="fisico" inputmode="decimal" placeholder="opcional"></label></div>
-    <div class="g3"><label>Retenção (%)<input name="ret" inputmode="decimal" value="${String(c.retPct || 0).replace('.', ',')}"></label><label>Vencimento<input type="date" name="venc" value="${proximoDiaUtil(addDays(hoje(), 7))}" required></label><label>Quadra<select name="quadra">${opts(qs.map(q => [q, q === '-' ? 'Geral' : 'Quadra ' + q]), qs[0])}</select></label></div>
+    <div class="g3"><label>Retenção (%)<input name="ret" inputmode="decimal" value="${String(c.retPct || 0).replace('.', ',')}"></label><label>Vencimento<input type="date" name="venc" value="${proximoDiaUtil(addDays(hoje(), 7))}" required></label><label>Quadra<select name="quadra">${opts(qs.map(q => [q, q === '__lotes' ? `Lotes do contrato (${c.lotes.length})` : q === '-' ? 'Geral' : 'Quadra ' + q]), qs[0])}</select></label></div>
+    ${c.planilha ? camposEtapasMedicao(c) : ''}
     <label class="chk"><input type="checkbox" name="ratear" checked> Dividir entre os lotes da quadra</label>
     ${variasEmpresas() ? `<label>CNPJ da nota / pagamento<select name="emp" required>${opts(empOpts(), c.emp || '', 'Escolha o CNPJ…')}</select></label>` : ''}
     <div class="preview" id="mPrev"></div>
     <div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Lançar medição</button></div></form>`);
   const F = f.el.querySelector('#fx');
-  const calc = () => { if (F.pct.value && document.activeElement === F.pct) F.valor.value = fNum2.format(r2(r.contratado * parseBR(F.pct.value) / 100)); const v = parseBR(F.valor.value) || 0, rt = r2(v * (parseBR(F.ret.value) || 0) / 100); $('#mPrev', F).innerHTML = v ? `Bruto ${brl2(v)} − retenção ${brl2(rt)} = <b>${brl2(v - rt)} a pagar</b>${v > r.saldo + 0.5 ? '<br><span class="neg">Passa do saldo do contrato: registre um aditivo.</span>' : ''}` : ''; };
+  const calc = () => { if (c.planilha) calcEtapasMedicao(F, c); if (F.pct.value && document.activeElement === F.pct) F.valor.value = fNum2.format(r2(r.contratado * parseBR(F.pct.value) / 100)); const v = parseBR(F.valor.value) || 0, rt = r2(v * (parseBR(F.ret.value) || 0) / 100); $('#mPrev', F).innerHTML = v ? `Bruto ${brl2(v)} − retenção ${brl2(rt)} = <b>${brl2(v - rt)} a pagar</b>${v > r.saldo + 0.5 ? '<br><span class="neg">Passa do saldo do contrato: registre um aditivo.</span>' : ''}` : ''; };
   F.addEventListener('input', calc);
   F.onsubmit = e => {
     e.preventDefault(); const v = parseBR(F.valor.value); if (!(v > 0)) { toast('Informe o valor medido.', 'err'); return; }
     if (F.emp && !F.emp.value) { toast('Escolha o CNPJ.', 'err'); return; }
     const rt = r2(v * (parseBR(F.ret.value) || 0) / 100); const venc = proximoDiaUtil(F.venc.value);
-    const m = { id: 'md' + uid(), n, data: F.data.value, ref: F.ref.value.trim(), valor: r2(v), ret: rt, fisico: parseBR(F.fisico.value) || 0, venc, quadra: F.quadra.value };
+    const m = { ...(c.planilha ? { etapas: etapasDoForm(F, c) } : {}), id: 'md' + uid(), n, data: F.data.value, ref: F.ref.value.trim(), valor: r2(v), ret: rt, fisico: parseBR(F.fisico.value) || 0, venc, quadra: F.quadra.value };
     const ts = titulosMedicao(c, m, venc, v - rt, m.quadra, F.ratear.checked, F.emp ? F.emp.value : c.emp, { titulo: `Medição ${n}${c.objeto ? ' ' + c.objeto : ''}`, medicao: m.id, obs: m.ref });
     salvarTitulos(ts); salvarContrato({ ...c, medicoes: [...(c.medicoes || []), m] }); f.fechar(); toast(`Medição ${n} lançada: ${brl2(v - rt)} a pagar`); ACOES.ctAbrir({ id: c.id });
   };
