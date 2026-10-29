@@ -705,7 +705,7 @@ function formNovo(def = {}) {
       <label>Intervalo<select name="intervalo"><option value="1">Mensal</option><option value="0.5">Quinzenal</option><option value="7d">Semanal</option></select></label></div>
     <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Vencimento em fim de semana ou feriado vai para o próximo dia útil</label>
     <div id="boxParc"></div>
-    <div id="boxReal" class="g2"><label>Data do pagamento<input type="date" name="pag" value="${def.pag || h}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), def.conta)}</select></label></div>
+    <div id="boxReal" class="g3"><label>Data do pagamento<input type="date" name="pag" value="${def.pag || h}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), def.conta)}</select></label><label>Juros / multa (R$) <span class="muted">fora do valor</span><input name="jurosR" inputmode="decimal" placeholder="0,00"></label></div>
     <div class="g2"><label>Quantidade <span class="muted">(opcional, para histórico de preço)</span><input name="qtd" inputmode="decimal" placeholder="Ex.: 200"></label><label>Unidade<input name="unid" list="dlUnid" placeholder="sc, m³, un, kg"></label></div><datalist id="dlUnid"><option value="sc"><option value="m³"><option value="m²"><option value="un"><option value="kg"><option value="t"><option value="milheiro"><option value="m"></datalist>
     <div class="g2"><label class="chk"><input type="checkbox" name="nf"> Tem nota fiscal</label><label>Número da NF<input name="nfNum" inputmode="numeric" placeholder="opcional"></label></div>
     <label>Observação<textarea name="obs" rows="2"></textarea></label>
@@ -775,7 +775,7 @@ function formNovo(def = {}) {
         const valor = (tipo === 'saida' ? -1 : 1) * valores[k++];
         if (!valor) continue;
         const t = { id: uid(), item, valor, juros: 0, ...(F.fornCnpj.value ? { fornCnpj: F.fornCnpj.value } : {}), nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: q !== '-' && E().quadras.includes(q) ? obraDe(q) : obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
-        if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
+        if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; const jr = parseBR(F.jurosR.value) || 0; if (jr > 0) t.juros = (tipo === 'saida' ? -1 : 1) * r2(jr / total); }
         if (venc !== parc[i].d) t.vencOrig = parc[i].d;
         if (F.etapaObra.value && tipo === 'saida' && F.ambito.value !== 'empresa') t.etapaObra = F.etapaObra.value;
         if (F.ambito.value === 'empresa') { t.ambito = 'empresa'; t.quadra = '-'; t.lote = '-'; t.local = ''; }
@@ -1376,8 +1376,10 @@ VIEWS.inicio = {
   }
 };
 
+/* Filtros dependem dos cadastros: se eles chegam ou mudam depois de a tela abrir, a barra de filtros é refeita. */
+const sigLista = () => JSON.stringify([variasEmpresas(), E().obras, E().quadras, E().contas.map(c => c.nome), todosDestinos(), S.list.some(ehEmpresa)]);
 function viewLista(modo) {
-  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', emp: '', obra: '', quadra: '', dest: '', locs: [], dests: [], conta: '', ini: '', fim: '' };
+  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', emp: '', obra: '', quadra: '', dest: '', locs: [], dests: [], jur: 'com', conta: '', ini: '', fim: '' };
   let selMode = false, limite = 200, agrup = true;
   const per = modo === 'extrato'
     ? [['mes', 'Este mês'], ['mesant', 'Mês passado'], ['30d', 'Últimos 30 dias'], ['ano', 'Este ano'], ['todos', 'Tudo'], ['custom', 'Período…']]
@@ -1385,7 +1387,7 @@ function viewLista(modo) {
   return {
     titulo: modo === 'pagar' ? 'Contas a pagar' : modo === 'receber' ? 'Contas a receber' : 'Extrato',
     montar(el) {
-      listaSel.clear(); selMode = false; limite = 200;
+      listaSel.clear(); selMode = false; limite = 200; el._sigLista = sigLista();
       if (filtroPendente) { Object.assign(F, filtroPendente); filtroPendente = null; }
       if (F.quadra) { F.locs = ['Q:' + F.quadra]; F.quadra = ''; } if (F.dest) { F.dests = [F.dest]; F.dest = ''; }
       el.innerHTML = `<div class="filtros card">
@@ -1397,16 +1399,18 @@ function viewLista(modo) {
         ${variasObras() || S.list.some(ehEmpresa) ? `<select id="fobra">${opts([...E().obras, ['__emp', 'Empresa (fora das obras)']], F.obra, 'Todas as obras')}</select>` : ''}
         ${multiSelLocais('flocs', F.locs, F.obra)}
         ${multiSel('fdests', 'Todos os destinos', ['op', 'nonop', 'rec', 'aporte'].map(s => [SECAO_NOME[s], (E().destinos[s] || []).map(d => [d, d])]).filter(g => g[1].length), F.dests)}
+        <select id="fjur" title="Como somar juros e multas">${opts([['com', 'Valores com juros'], ['sem', 'Sem juros (só o principal)'], ['so', 'Só juros e multas']], F.jur)}</select>
         <label class="tgl"><input type="checkbox" id="fgrp" ${agrup ? 'checked' : ''}> Agrupar lotes</label>
         <button class="btn" id="bSel">Selecionar</button>
       </div><div id="lsaldo"></div><div class="card"><div id="ltot" class="ltot"></div><div id="lrows" class="tlist"></div><div id="lmore"></div></div><div id="selbar" class="selbar hidden"></div>`;
       const bind = (id, k, ev = 'change') => $('#' + id, el)?.addEventListener(ev, e => { F[k] = e.target.value; limite = 200; if (k === 'per') $('#fcustom', el).classList.toggle('hidden', F.per !== 'custom'); this.refresh(el); });
-      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('femp', 'emp'); bind('fobra', 'obra'); ligarMultiSel(el, 'flocs', v => { F.locs = v; limite = 200; this.refresh(el); }); ligarMultiSel(el, 'fdests', v => { F.dests = v; limite = 200; this.refresh(el); });
+      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('femp', 'emp'); bind('fobra', 'obra'); bind('fjur', 'jur'); ligarMultiSel(el, 'flocs', v => { F.locs = v; limite = 200; this.refresh(el); }); ligarMultiSel(el, 'fdests', v => { F.dests = v; limite = 200; this.refresh(el); });
       $('#fgrp', el).onchange = e => { agrup = e.target.checked; limite = 200; this.refresh(el); };
       const bs = $('#bSel', el); if (bs) bs.onclick = () => { selMode = !selMode; listaSel.clear(); bs.classList.toggle('on', selMode); bs.textContent = selMode ? 'Cancelar seleção' : 'Selecionar'; this.refresh(el); };
     },
     sair() { listaSel.clear(); },
     refresh(el) {
+      if (el._sigLista !== undefined && el._sigLista !== sigLista()) { this.montar(el); }
       const h = hoje(); const st = modo === 'extrato' ? 'pago' : F.st;
       const campo = st === 'aberto' ? 'venc' : st === 'pago' ? 'pag' : 'venc';
       const q = F.q.trim().toLowerCase();
@@ -1425,6 +1429,7 @@ function viewLista(modo) {
         if (F.per === 'vencidas' && pago(t)) return false;
         if (F.emp === '__sem') { if (empDef(t)) return false; } else if (F.emp === '__div') { if (!empDiverge(t)) return false; } else if (F.emp && empT(t) !== F.emp) return false; if (F.obra === '__emp') { if (!ehEmpresa(t)) return false; } else if (F.obra && obraT(t) !== F.obra) return false; if (F.locs.length && !casaLocais(t, F.locs)) return false; if (F.dests.length && !F.dests.includes(t.destino)) return false;
         if (F.conta && t.conta !== F.conta) return false;
+        if (F.jur === 'so' && !(pago(t) && t.juros)) return false;
         if (q && !(t.item.toLowerCase().includes(q) || (t.forn || '').toLowerCase().includes(q) || (t.obs || '').toLowerCase().includes(q) || (t.nfNum || '').includes(q))) return false;
         return okPer(campo === 'pag' ? (t.pag || t.venc) : t.venc);
       });
@@ -1438,13 +1443,15 @@ function viewLista(modo) {
         saldoMap = new Map(); for (const t of all) { s += t.valor + (t.juros || 0); saldoMap.set(t.id, s); }
         $('#lsaldo', el).innerHTML = `<div class="grid kpis">${kpi('Saldo total', brl(sd.total), 'todas as contas', cls(sd.total))}${sd.contas.map(c => kpi(esc(c.nome), brl(c.saldo), c.inicial ? 'saldo inicial ' + brl(c.inicial) : '', cls(c.saldo))).join('')}</div>`;
       } else if (modo === 'extrato') $('#lsaldo', el).innerHTML = '';
-      const tot = sum(rows, t => t.valor + (pago(t) ? (t.juros || 0) : 0));
-      const ent = sum(rows, t => Math.max(0, t.valor)), sai = sum(rows, t => Math.min(0, t.valor) + Math.min(0, pago(t) ? (t.juros || 0) : 0));
-      $('#ltot', el).innerHTML = `<span><b>${rows.length.toLocaleString('pt-BR')}</b> lançamento(s)</span>${modo === 'extrato' ? `<span>Entradas <b class="pos">${brl(ent)}</b></span><span>Saídas <b class="neg">${brl(sai)}</b></span>` : ''}<span>Total <b class="${cls(tot)}">${brl2(tot)}</b></span>${selMode ? `<button class="btn link sm" id="bSelAll">${modo === 'extrato' || F.st === 'pago' ? 'Selecionar todos' : 'Selecionar todos em aberto'}</button>` : ''}`;
+      const jurT = x => pago(x) ? (x.juros || 0) : 0;
+      const valT = x => F.jur === 'sem' ? x.valor : F.jur === 'so' ? jurT(x) : x.valor + jurT(x);
+      const tot = sum(rows, valT), jurTot = sum(rows, jurT);
+      const ent = sum(rows, t => F.jur === 'so' ? Math.max(0, jurT(t)) : Math.max(0, t.valor)), sai = sum(rows, t => F.jur === 'so' ? Math.min(0, jurT(t)) : Math.min(0, t.valor) + (F.jur === 'sem' ? 0 : Math.min(0, jurT(t))));
+      $('#ltot', el).innerHTML = `<span><b>${rows.length.toLocaleString('pt-BR')}</b> lançamento(s)</span>${modo === 'extrato' ? `<span>Entradas <b class="pos">${brl(ent)}</b></span><span>Saídas <b class="neg">${brl(sai)}</b></span>` : ''}<span>Total ${F.jur === 'sem' ? 'sem juros' : F.jur === 'so' ? 'de juros e multas' : ''} <b class="${cls(tot)}">${brl2(tot)}</b></span>${F.jur === 'com' && Math.abs(jurTot) > 0.004 ? `<span class="muted">principal ${brl2(tot - jurTot)} + juros/multas <b class="neg">${brl2(jurTot)}</b></span>` : F.jur === 'sem' && Math.abs(jurTot) > 0.004 ? `<span class="muted">juros/multas fora do total: ${brl2(jurTot)}</span>` : ''}${selMode ? `<button class="btn link sm" id="bSelAll">${modo === 'extrato' || F.st === 'pago' ? 'Selecionar todos' : 'Selecionar todos em aberto'}</button>` : ''}`;
       const sa = $('#bSelAll', el); if (sa) sa.onclick = () => { rows.filter(t => modo === 'extrato' || F.st === 'pago' || !pago(t)).forEach(t => listaSel.add(t.id)); this.refresh(el); };
       let html = '', mesAtual = null;
       const dOf = x => ((campo === 'pag' ? (x.pag || x.venc) : x.venc) || '');
-      const subMes = {}; for (const x of rows) { const m = dOf(x).slice(0, 7); subMes[m] = (subMes[m] || 0) + x.valor + (pago(x) ? (x.juros || 0) : 0); }
+      const subMes = {}; for (const x of rows) { const m = dOf(x).slice(0, 7); subMes[m] = (subMes[m] || 0) + valT(x); }
       const entradas = agrup ? agrupar(rows, campo) : rows.map(t => ({ t }));
       for (const e of entradas.slice(0, limite)) {
         const t = e.t || e.itens[0]; const m = dOf(t).slice(0, 7);
