@@ -47,17 +47,21 @@ function lotesDosAcordos() {
 function calcSocios() {
   const adm = !!cfgSocios().adm; const RL = resultadoLotes(adm); const dono = lotesDosAcordos();
   const res = acordos().map(a => { const ks = Object.keys(dono).filter(k => dono[k] === a.id); const qs = [...new Set(ks.map(k => k.split('|')[0]))];
-    const rs = qs.map(q => { const xs = ks.filter(k => k.startsWith(q + '|')).map(k => RL[k]).filter(Boolean); return { q, n: xs.length, total: lotesDe(q).length, rec: sum(xs, x => x.rec), custo: sum(xs, x => x.custo), real: sum(xs, x => x.real), proj: sum(xs, x => x.proj) }; });
-    return { a, qs, ks, rs, real: sum(rs, r => r.real), proj: sum(rs, r => r.proj) }; });
+    const rs = qs.map(q => { const xs = ks.filter(k => k.startsWith(q + '|')).map(k => RL[k]).filter(Boolean); const fin = xs.filter(x => infoVendaLote(x.q, x.l).etapa === 'recebido'); return { q, n: xs.length, total: lotesDe(q).length, nFin: fin.length, rec: sum(xs, x => x.rec), custo: sum(xs, x => x.custo), real: sum(xs, x => x.real), proj: sum(xs, x => x.proj), conc: sum(fin, x => x.real) }; });
+    return { a, qs, ks, rs, real: sum(rs, r => r.real), proj: sum(rs, r => r.proj), conc: sum(rs, r => r.conc) }; });
   const so = listaSocios().map(s => {
     const ts = S.list.filter(t => ehAporteSocio(t) && socioDe(t) === s.id);
     const ent = sum(ts.filter(t => pago(t) && t.valor > 0), t => t.valor), sai = sum(ts.filter(t => pago(t) && t.valor < 0), t => t.valor);
     const prev = sum(ts.filter(t => !pago(t)), t => t.valor);
+    const conc = sum(res, r => r.conc * (+(r.a.partes || {})[s.id] || 0) / 100);
     const real = sum(res, r => r.real * (+(r.a.partes || {})[s.id] || 0) / 100), proj = sum(res, r => r.proj * (+(r.a.partes || {})[s.id] || 0) / 100);
-    return { s, ts, ent, sai, liq: ent + sai, prev, real, proj, pos: ent + sai + real, posProj: ent + sai + prev + proj };
+    return { s, ts, ent, sai, liq: ent + sai, prev, real, proj, conc, pos: ent + sai + real, posHoje: ent + sai + conc, posProj: ent + sai + prev + proj };
   });
   const totLiq = sum(so.filter(x => x.liq > 0), x => x.liq);
   so.forEach(x => { x.pctCap = totLiq && x.liq > 0 ? x.liq / totLiq : 0; });
+  /* Participação no patrimônio: saldo de cada sócio sobre a soma dos saldos positivos (quem está negativo deve à sociedade e fica com 0%). */
+  const totPos = sum(so.filter(x => x.posHoje > 0), x => x.posHoje), totProj = sum(so.filter(x => x.posProj > 0), x => x.posProj);
+  so.forEach(x => { x.partHoje = totPos && x.posHoje > 0 ? x.posHoje / totPos : 0; x.partProj = totProj && x.posProj > 0 ? x.posProj / totProj : 0; });
   const semSocio = S.list.filter(t => ehAporteSocio(t) && !socioDe(t));
   return { res, so, semSocio, adm };
 }
@@ -71,7 +75,16 @@ VIEWS.socios = {
       $('#sCriar', el).onclick = () => det.length ? salvarSocios({ lista: det.map(n => ({ id: uid(), nome: n, apelidos: '' })), acordos: [] }) : ACOES.socioEd({}); return; }
     const C = calcSocios(); const so = C.so;
     const cor = i => ['#1F3A6B', '#2E8B6A', '#C08A2E', '#8A5BB5', '#C2554A'][i % 5];
-    el.innerHTML = `<div class="grid kpis k4">${so.slice(0, 4).map(x => kpi(esc(x.s.nome), brl(x.pos), `aportou ${brl(x.ent)} · retirou ${brl(-x.sai)} · resultado ${brl(x.real)}`, cls(x.pos))).join('')}</div>
+    const barra = (k, tit, sub) => `<div class="part-linha"><div class="part-tit"><b>${tit}</b><span class="muted small">${sub}</span></div><div class="part-barra">${so.map((x, i) => x[k] > 0.0005 ? `<span style="width:${(x[k] * 100).toFixed(2)}%;background:${cor(i)}" title="${esc(x.s.nome)} ${fPct.format(x[k])}">${x[k] > 0.08 ? `${esc(x.s.nome)} ${fPct.format(x[k])}` : ''}</span>` : '').join('')}</div></div>`;
+    const quadroPart = `<div class="card"><h2>Participação de cada sócio <span class="hint">sobre o patrimônio de cada um</span></h2>
+      ${barra('pctCap', 'Pelo capital', 'só o que cada um colocou menos o que retirou')}
+      ${barra('partHoje', 'Hoje', 'capital + lucro dos lotes já concluídos (obras em andamento contam pelo custo)')}
+      ${barra('partProj', 'Projetada', 'capital + resultado quando as obras terminarem (a receber e a pagar)')}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Sócio</th><th>Pelo capital</th><th>Hoje</th><th>Projetada</th><th>Variação hoje → projetada</th></tr></thead><tbody>
+      ${so.map((x, i) => `<tr><td class="l"><span class="dot-s" style="background:${cor(i)}"></span><b>${esc(x.s.nome)}</b></td><td>${fPct.format(x.pctCap)}</td><td><b>${fPct.format(x.partHoje)}</b> <span class="muted small">${brl(x.posHoje)}</span></td><td><b>${fPct.format(x.partProj)}</b> <span class="muted small">${brl(x.posProj)}</span></td><td class="${cls(x.partProj - x.partHoje)}">${((x.partProj - x.partHoje) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1, signDisplay: 'exceptZero' })} p.p.</td></tr>`).join('')}</tbody></table></div>
+      <p class="muted small">Participação = patrimônio do sócio ÷ soma dos patrimônios positivos. <b>Hoje</b>: o que ele colocou − o que retirou + a parte dele no lucro dos lotes com repasse recebido; o dinheiro gasto em obras em andamento é investimento (vale o custo), não prejuízo. <b>Projetada</b>: soma também o resultado previsto de todos os lotes (o que falta receber e pagar). Patrimônio negativo (retirou mais do que a parte dele) conta como 0%. A participação muda porque cada acordo divide o lucro numa proporção diferente do capital de cada um.</p></div>`;
+    el.innerHTML = `<div class="grid kpis k4">${so.slice(0, 4).map(x => kpi(esc(x.s.nome), fPct.format(x.partHoje) + ' → ' + fPct.format(x.partProj), `hoje ${brl(x.posHoje)} · projetado ${brl(x.posProj)}`, '')).join('')}</div>
+      ${quadroPart}
       <div class="card"><h2>Posição de cada sócio <span class="hint">capital líquido + parte do resultado</span><button class="btn sm rw" data-act="socioEd">Adicionar sócio</button></h2>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Sócio</th><th>Aportou</th><th>Retirou</th><th>Capital líquido</th><th>% do capital</th><th>Resultado realizado</th><th>Saldo realizado</th><th>Resultado projetado</th><th>Saldo projetado</th><th></th></tr></thead><tbody>
       ${so.map((x, i) => `<tr><td class="l"><span class="dot-s" style="background:${cor(i)}"></span><b>${esc(x.s.nome)}</b></td><td class="pos">${brl(x.ent)}</td><td class="neg">${brl(x.sai)}</td><td class="${cls(x.liq)}"><b>${brl(x.liq)}</b></td><td>${x.pctCap ? fPct.format(x.pctCap) : '—'}</td><td class="${cls(x.real)}">${brl(x.real)}</td><td class="${cls(x.pos)}"><b>${brl(x.pos)}</b></td><td class="${cls(x.proj)}">${brl(x.proj)}</td><td class="${cls(x.posProj)}">${brl(x.posProj)}</td><td><button class="btn sm" data-act="socioVer" data-id="${esc(x.s.id)}">Movimentos</button> <button class="btn sm link rw" data-act="socioEd" data-id="${esc(x.s.id)}">Editar</button></td></tr>`).join('')}
