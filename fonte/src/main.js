@@ -46,6 +46,29 @@ function parseBR(s) {
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function toast(msg, tipo) { const t = $('#toast'); t.textContent = msg; t.className = 'on ' + (tipo || ''); clearTimeout(toast._t); toast._t = setTimeout(() => t.className = '', 3500); }
 
+/* ---------- Dias úteis e feriados ---------- */
+function pascoa(y) { const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1; return isoLocal(new Date(y, mes - 1, dia)); }
+const _feriados = {};
+function feriadosNacionais(y) {
+  if (_feriados[y]) return _feriados[y];
+  const m = new Map(); const p = pascoa(y);
+  [['01-01', 'Confraternização Universal'], ['04-21', 'Tiradentes'], ['05-01', 'Dia do Trabalho'], ['09-07', 'Independência'], ['10-12', 'Nossa Senhora Aparecida'], ['11-02', 'Finados'], ['11-15', 'Proclamação da República'], ['11-20', 'Consciência Negra'], ['12-25', 'Natal']].forEach(([md, n]) => m.set(`${y}-${md}`, n));
+  m.set(addDays(p, -48), 'Carnaval'); m.set(addDays(p, -47), 'Carnaval'); m.set(addDays(p, -2), 'Sexta-feira Santa'); m.set(addDays(p, 60), 'Corpus Christi');
+  return (_feriados[y] = m);
+}
+function feriadoNome(iso) {
+  const n = feriadosNacionais(+iso.slice(0, 4)).get(iso); if (n) return n;
+  for (const f of E().feriados) if (f.d.length === 5 ? iso.slice(5) === f.d : iso === f.d) return f.nome || 'Feriado local';
+  return '';
+}
+const DSEM = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const diaSemana = iso => new Date(iso + 'T12:00').getDay();
+function motivoNaoUtil(iso) { if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return ''; const w = diaSemana(iso); if (w === 6) return 'sábado'; if (w === 0) return 'domingo'; return feriadoNome(iso); }
+function proximoDiaUtil(iso) { let d = iso, n = 0; while (motivoNaoUtil(d) && n++ < 20) d = addDays(d, 1); return d; }
+const dCurtoSem = iso => DSEM[diaSemana(iso)] + ' ' + dBR(iso).slice(0, 5);
+const prefUtil = () => { try { return localStorage.getItem('sfgUtil') !== '0'; } catch (e) { return true; } };
+const setPrefUtil = v => { try { localStorage.setItem('sfgUtil', v ? '1' : '0'); } catch (e) { /* ok */ } };
+
 /* =========================================================
    Firebase
    ========================================================= */
@@ -83,7 +106,8 @@ const E = () => {
     quadras: e.quadras || [],
     lotes: e.lotes || {},
     destinos: e.destinos || DEST_PADRAO,
-    contas: e.contas && e.contas.length ? e.contas : [{ nome: 'BTG', inicial: 0 }, { nome: 'Caixa', inicial: 0 }]
+    contas: e.contas && e.contas.length ? e.contas : [{ nome: 'BTG', inicial: 0 }, { nome: 'Caixa', inicial: 0 }],
+    feriados: e.feriados || []
   };
 };
 function secaoDe(dest) { const d = E().destinos; for (const s of ['op', 'nonop', 'rec', 'aporte']) if ((d[s] || []).includes(dest)) return s; return dest === 'Aporte' ? 'aporte' : 'nonop'; }
@@ -399,6 +423,8 @@ function formNovo(def = {}) {
     <div id="boxLotes"></div>
     <div class="g2"><label>Parcelas<input name="parcelas" type="number" min="1" max="240" value="1" inputmode="numeric"></label>
       <label>Intervalo<select name="intervalo"><option value="1">Mensal</option><option value="0.5">Quinzenal</option><option value="7d">Semanal</option></select></label></div>
+    <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Vencimento em fim de semana ou feriado vai para o próximo dia útil</label>
+    <div id="boxParc"></div>
     <div id="boxReal" class="g2"><label>Data do pagamento<input type="date" name="pag" value="${def.pag || h}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), def.conta)}</select></label></div>
     <div class="g2"><label>Quantidade <span class="muted">(opcional, para histórico de preço)</span><input name="qtd" inputmode="decimal" placeholder="Ex.: 200"></label><label>Unidade<input name="unid" list="dlUnid" placeholder="sc, m³, un, kg"></label></div><datalist id="dlUnid"><option value="sc"><option value="m³"><option value="m²"><option value="un"><option value="kg"><option value="t"><option value="milheiro"><option value="m"></datalist>
     <div class="g2"><label class="chk"><input type="checkbox" name="nf"> Tem nota fiscal</label><label>Número da NF<input name="nfNum" inputmode="numeric" placeholder="opcional"></label></div>
@@ -416,46 +442,74 @@ function formNovo(def = {}) {
     const q = F.quadra.value, ls = q === '-' ? [] : lotesDe(q);
     $('#boxLotes', F).innerHTML = ls.length ? `<div class="lbl">Lotes <span class="muted">(nenhum marcado = custo geral da quadra)</span> <button type="button" class="btn link sm" data-lt="all">Todos</button><button type="button" class="btn link sm" data-lt="none">Limpar</button></div>
       <div class="chips">${ls.map(l => `<label class="pick"><input type="checkbox" name="lotes" value="${esc(l)}" ${String(def.lote) === String(l) ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>` : '';
-    $$('[data-lt]', F).forEach(b => b.onclick = () => { $$('[name=lotes]', F).forEach(c => c.checked = b.dataset.lt === 'all'); prev(); });
+    $$('[data-lt]', F).forEach(b => b.onclick = () => { $$('[name=lotes]', F).forEach(c => c.checked = b.dataset.lt === 'all'); recalcParc(); prev(); });
   };
   const real = () => { $('#boxReal', F).classList.toggle('hidden', !F.realizado.checked); };
+  let parc = [];
+  const nParc = () => Math.max(1, Math.min(240, parseInt(F.parcelas.value) || 1));
+  const nLotes = () => Math.max(1, $$('[name=lotes]:checked', F).length);
+  const dataBase = i => { const v0 = F.venc.value, iv = F.intervalo.value; if (!v0) return ''; return iv === '7d' ? addDays(v0, 7 * i) : iv === '0.5' ? (i % 2 ? addDays(addMonths(v0, Math.floor(i / 2)), 15) : addMonths(v0, i / 2)) : addMonths(v0, i); };
+  const ajustada = d => F.util.checked && d ? proximoDiaUtil(d) : d;
+  const notaData = d => { const m = motivoNaoUtil(d); if (!d || !m) return ''; return F.util.checked ? `${m}: vai para ${dCurtoSem(proximoDiaUtil(d))}` : `cai em ${m}`; };
+  const recalcParc = (manterDatas) => {
+    const n = nParc(), v = parseBR(F.valor.value) || 0, total = F.modo.value === 'cada' ? v * nLotes() * n : v;
+    const novo = Array.from({ length: n }, (_, i) => { const o = parc[i]; return { d: o && o.dEdit && manterDatas !== false ? o.d : dataBase(i), dEdit: !!(o && o.dEdit && manterDatas !== false), v: o && o.vEdit ? o.v : null, vEdit: !!(o && o.vEdit) }; });
+    const fixo = sum(novo.filter(p => p.vEdit), p => p.v || 0), livres = novo.filter(p => !p.vEdit);
+    const cents = Math.max(0, Math.round((total - fixo) * 100)); const base = livres.length ? Math.floor(cents / livres.length) : 0; let resto = cents - base * livres.length;
+    livres.forEach(p => { p.v = (base + (resto-- > 0 ? 1 : 0)) / 100; });
+    parc = novo; renderParc();
+  };
+  const renderParc = () => {
+    const box = $('#boxParc', F); const n = parc.length;
+    if (n <= 1) { const nt = notaData(F.venc.value); box.innerHTML = nt ? `<p class="hint-data">Vencimento ${dBR(F.venc.value).slice(0, 5)} ${esc(nt)}.</p>` : ''; return; }
+    box.innerHTML = `<div class="lbl">Parcelas <span class="muted">altere a data ou o valor de qualquer uma</span> <button type="button" class="btn link sm" id="pReset">Refazer datas</button></div>
+      <div class="parc-tbl">${parc.map((p, i) => `<div class="parc-row"><span class="pn">${i + 1}/${n}</span><input type="date" data-pd="${i}" value="${esc(p.d)}" aria-label="Data da parcela ${i + 1}"><input inputmode="decimal" data-pv="${i}" value="${fNum2.format(p.v || 0)}" aria-label="Valor da parcela ${i + 1}"><span class="pnota" id="pn${i}">${esc(notaData(p.d))}</span></div>`).join('')}</div>`;
+    $$('[data-pd]', box).forEach(inp => inp.oninput = () => { const i = +inp.dataset.pd; parc[i].d = inp.value; parc[i].dEdit = true; $('#pn' + i, box).textContent = notaData(inp.value); prev(); });
+    $$('[data-pv]', box).forEach(inp => inp.onchange = () => { const i = +inp.dataset.pv; const v = parseBR(inp.value); parc[i].v = v > 0 ? v : 0; parc[i].vEdit = true; recalcParc(); prev(); });
+    $('#pReset', box).onclick = () => { parc.forEach(p => { p.dEdit = false; p.vEdit = false; }); recalcParc(false); prev(); };
+  };
+  F.addEventListener('input', e => { const nm = e.target.name; if (['venc', 'parcelas', 'intervalo', 'valor', 'modo', 'lotes'].includes(nm)) recalcParc(); });
+  F.addEventListener('change', e => { const nm = e.target.name; if (['intervalo', 'modo', 'lotes'].includes(nm)) recalcParc(); if (nm === 'util') { setPrefUtil(F.util.checked); renderParc(); } });
   const gerar = () => {
-    const v = parseBR(F.valor.value); const n = Math.max(1, Math.min(240, parseInt(F.parcelas.value) || 1));
+    const v = parseBR(F.valor.value); const n = parc.length || 1;
     const lotes = $$('[name=lotes]:checked', F).map(c => c.value); const L = lotes.length ? lotes : ['-'];
     const total = L.length * n;
     if (!(v > 0)) return { erro: 'Informe um valor maior que zero.', total };
-    let valores;
-    if (F.modo.value === 'cada') valores = Array(total).fill(r2(v));
-    else { const cents = Math.round(v * 100); const base = Math.floor(cents / total); let resto = cents - base * total; valores = Array.from({ length: total }, () => (base + (resto-- > 0 ? 1 : 0)) / 100); }
-    const q = F.quadra.value, base = F.item.value.trim(), venc0 = F.venc.value, iv = F.intervalo.value;
-    const out = []; let k = 0; const grupo = total > 1 ? uid() : '';
+    if (parc.some(p => !p.d)) return { erro: 'Preencha a data de todas as parcelas.', total };
+    const q = F.quadra.value, base = F.item.value.trim();
+    const out = []; const grupo = total > 1 ? uid() : ''; let ajustes = 0;
     for (let i = 0; i < n; i++) {
-      const venc = iv === '7d' ? addDays(venc0, 7 * i) : iv === '0.5' ? (i % 2 ? addDays(addMonths(venc0, Math.floor(i / 2)), 15) : addMonths(venc0, i / 2)) : addMonths(venc0, i);
+      const venc = ajustada(parc[i].d); if (venc !== parc[i].d) ajustes++;
+      const cents = Math.round((parc[i].v || 0) * 100); const bL = Math.floor(cents / L.length); let rL = cents - bL * L.length;
+      const valores = L.map(() => (bL + (rL-- > 0 ? 1 : 0)) / 100); let k = 0;
       for (const l of L) {
         let item = base + (n > 1 ? ` (${i + 1}/${n})` : '') + (l !== '-' ? ` - ${q} ${l}` : (q !== '-' ? ` - ${q}` : ''));
         const valor = (tipo === 'saida' ? -1 : 1) * valores[k++];
+        if (!valor) continue;
         const t = { id: uid(), item, valor, juros: 0, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: E().local, quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
         if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
+        if (venc !== parc[i].d) t.vencOrig = parc[i].d;
         const qt = parseBR(F.qtd.value); if (qt > 0) { t.qtd = Math.round((F.modo.value === 'cada' ? qt : qt / total) * 1000) / 1000; t.unid = F.unid.value.trim(); }
         if (def.conc && total === 1) t.conc = def.conc;
         out.push(t);
       }
     }
-    return { lista: out, total };
+    return { lista: out, total: out.length, ajustes };
   };
   const prev = () => {
     const g = gerar(); const p = $('#prevNovo', F);
     if (!F.item.value.trim()) { p.innerHTML = ''; return; }
     if (g.erro) { p.innerHTML = `<span class="muted">${g.total} lançamento(s)</span>`; return; }
     const tot = sum(g.lista, t => t.valor);
-    p.innerHTML = `<b>${g.total} lançamento${g.total > 1 ? 's' : ''}</b> · total <b class="${cls(tot)}">${brl2(tot)}</b><br><span class="muted">Ex.: ${esc(g.lista[0].item)} · ${brl2(g.lista[0].valor)} · vence ${dBR(g.lista[0].venc)}${g.total > 1 ? ` … último ${dBR(g.lista[g.lista.length - 1].venc)}` : ''}</span>`;
+    if (!g.lista.length) { p.innerHTML = '<span class="muted">Informe valores maiores que zero.</span>'; return; }
+    p.innerHTML = `<b>${g.total} lançamento${g.total > 1 ? 's' : ''}</b>, total <b class="${cls(tot)}">${brl2(tot)}</b>${g.ajustes ? `, ${g.ajustes} vencimento(s) passado(s) para dia útil` : ''}<br><span class="muted">Primeiro: ${esc(g.lista[0].item)}, ${brl2(g.lista[0].valor)}, vence ${dCurtoSem(g.lista[0].venc)}${g.total > 1 ? `. Último vence ${dCurtoSem(g.lista[g.lista.length - 1].venc)}` : ''}</span>`;
   };
-  F.quadra.onchange = () => { lotesBox(); prev(); };
+  F.quadra.onchange = () => { lotesBox(); recalcParc(); prev(); };
   F.realizado.onchange = () => { real(); prev(); };
   F.addEventListener('input', prev); F.addEventListener('change', prev);
-  lotesBox(); real(); prev();
+  lotesBox(); real(); recalcParc(); prev();
   F.onsubmit = async e => {
-    e.preventDefault(); const g = gerar(); if (g.erro) { toast(g.erro, 'err'); return; }
+    e.preventDefault(); const g = gerar(); if (g.erro) { toast(g.erro, 'err'); return; } if (!g.lista.length) { toast('Informe valores maiores que zero.', 'err'); return; }
     if (g.total > 60 && !(await confirmar(`Isso vai criar <b>${g.total}</b> lançamentos. Continuar?`, 'Criar', false))) return;
     const arq = F.anexo.files[0];
     if (arq) { try { const aid = await salvarAnexo(arq); g.lista.forEach(t => t.anexo = aid); } catch (err) { toast(err.message, 'err'); return; } }
@@ -471,6 +525,7 @@ function formEditar(t) {
     <label>Descrição<input name="item" required value="${esc(t.item)}"></label>
     <div class="g2"><label>Fornecedor / cliente<input name="forn" value="${esc(t.forn || '')}"></label><label>Destino<select name="destino">${optsDestino(t.destino)}${todosDestinos().includes(t.destino) ? '' : `<option selected>${esc(t.destino)}</option>`}</select></label></div>
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required value="${fNum2.format(Math.abs(t.valor))}"></label><label>Vencimento<input type="date" name="venc" required value="${esc(t.venc)}"></label></div>
+    <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Se cair em fim de semana ou feriado, passar para o próximo dia útil</label><p class="hint-data" id="edHint"></p>
     <div class="g2"><label>Quadra<select name="quadra">${opts(quadrasOpts(), t.quadra || '-')}${(t.quadra && t.quadra !== '-' && !E().quadras.includes(t.quadra)) ? `<option selected>${esc(t.quadra)}</option>` : ''}</select></label>
       <label>Lote<select name="lote">${opts([['-', 'Sem lote (-)'], ...lots], t.lote || '-')}${(t.lote && t.lote !== '-' && !lots.includes(t.lote)) ? `<option selected>${esc(t.lote)}</option>` : ''}</select></label></div>
     ${pago(t) ? `<div class="g3"><label>Pago em<input type="date" name="pag" value="${esc(t.pag || t.venc)}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), t.conta)}</select></label><label>Juros/multa (R$)<input name="juros" inputmode="decimal" value="${t.juros ? fNum2.format(Math.abs(t.juros)) : ''}"></label></div>` : ''}
@@ -480,11 +535,13 @@ function formEditar(t) {
     <div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fEd'); let tipo = t.valor < 0 ? 'saida' : 'entrada';
   $$('#segTipo button', F).forEach(b => b.onclick = () => { tipo = b.dataset.v; $$('#segTipo button', F).forEach(x => x.classList.toggle('on', x === b)); });
+  const edHint = () => { const m = motivoNaoUtil(F.venc.value); $('#edHint', F).textContent = m ? (F.util.checked ? `Cai em ${m}: será salvo para ${dCurtoSem(proximoDiaUtil(F.venc.value))}.` : `Cai em ${m}.`) : ''; };
+  F.venc.oninput = edHint; F.util.onchange = () => { setPrefUtil(F.util.checked); edHint(); }; edHint();
   F.quadra.onchange = () => { const q = F.quadra.value; F.lote.innerHTML = opts([['-', 'Sem lote (-)'], ...(q === '-' ? [] : lotesDe(q))], '-'); };
   F.onsubmit = e => {
     e.preventDefault(); const v = parseBR(F.valor.value); if (!(v >= 0)) { toast('Valor inválido', 'err'); return; }
     const sg = tipo === 'saida' ? -1 : 1;
-    const n = { ...t, item: F.item.value.trim(), forn: F.forn.value.trim(), destino: F.destino.value, valor: sg * v, venc: F.venc.value, quadra: F.quadra.value, lote: F.lote.value, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), obs: F.obs.value.trim() };
+    const n = { ...t, item: F.item.value.trim(), forn: F.forn.value.trim(), destino: F.destino.value, valor: sg * v, venc: F.util.checked ? proximoDiaUtil(F.venc.value) : F.venc.value, quadra: F.quadra.value, lote: F.lote.value, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), obs: F.obs.value.trim() };
     { const qt = parseBR(F.qtd.value); if (qt > 0) { n.qtd = qt; n.unid = F.unid.value.trim(); } else { delete n.qtd; delete n.unid; } }
     if (pago(t)) { n.pag = F.pag.value; n.conta = F.conta.value; const j = parseBR(F.juros.value); n.juros = j > 0 ? sg * j : 0; }
     salvarTitulos([n]); f.fechar(); toast('Alteração salva');
@@ -1068,10 +1125,19 @@ VIEWS.cadastros = {
     <div class="card"><h2>Quadras e lotes <button class="btn sm" data-act="cadQuadra">Adicionar quadra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th>Lotes</th><th class="l">Numeração</th><th>Lançamentos</th><th></th></tr></thead><tbody>
       ${e.quadras.map(q => { const ls = lotesDe(q); return `<tr><td class="l"><b>${esc(q)}</b></td><td>${ls.length}</td><td class="l wrap muted small">${esc(ls.slice(0, 30).join(', '))}${ls.length > 30 ? '…' : ''}</td><td>${usados('quadra', q)}</td><td><button class="btn sm" data-act="cadQuadra" data-q="${esc(q)}">Editar</button></td></tr>`; }).join('')}</tbody></table></div></div>
     <div class="card"><h2>Destinos (categorias)</h2><div class="grid two">${['op', 'nonop', 'rec', 'aporte'].map(s => `<div><div class="lbl">${SECAO_NOME[s]} <button class="btn link sm" data-act="cadDest" data-s="${s}">+ adicionar</button></div><div class="chips">${(e.destinos[s] || []).map(d => `<span class="chip">${esc(d)} <button class="x" data-act="rmDest" data-s="${s}" data-d="${esc(d)}" aria-label="Remover">×</button></span>`).join('')}</div></div>`).join('')}</div></div>
+    <div class="card"><h2>Feriados <button class="btn sm rw" data-act="cadFeriado">Adicionar feriado local</button></h2>
+      <p class="muted small">Vencimentos que caem nestes dias (ou em fins de semana) vão para o próximo dia útil. Os feriados nacionais, inclusive Carnaval, Sexta-feira Santa e Corpus Christi, já são calculados todo ano. Inclua os feriados de Juazeiro e da Bahia que afetam os seus pagamentos.</p>
+      <div class="chips">${((e.feriados) || []).map((f, i) => `<span class="chip">${esc(f.d.length === 5 ? f.d.slice(3) + '/' + f.d.slice(0, 2) + ' (todo ano)' : dBR(f.d))} ${esc(f.nome || '')} <button class="x rw" data-act="rmFeriado" data-i="${i}" aria-label="Remover">×</button></span>`).join('') || '<span class="muted small">Nenhum feriado local cadastrado.</span>'}</div>
+      <details style="margin-top:10px"><summary class="muted small">Ver feriados nacionais de ${new Date().getFullYear()}</summary><div class="chips" style="margin-top:8px">${[...feriadosNacionais(new Date().getFullYear()).entries()].sort().map(([d, n]) => `<span class="chip">${dBR(d).slice(0, 5)} ${esc(n)}</span>`).join('')}</div></details></div>
     <div class="card"><h2>Documentos do checklist <button class="btn sm" data-act="cadDoc">Adicionar</button></h2><div class="chips">${((S.checklist && S.checklist.docs) || DOCS_PADRAO).map(d => `<span class="chip">${esc(d)}</span>`).join('')}</div></div>`;
   }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
+ACOES.cadFeriado = () => {
+  const f = folha('Feriado local', `<form class="form" id="fx"><div class="g2"><label>Data<input type="date" name="d" required></label><label>Nome<input name="nome" placeholder="Ex.: Independência da Bahia"></label></div><label class="chk"><input type="checkbox" name="anual" checked> Repete todo ano</label><div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Adicionar</button></div></form>`);
+  f.el.querySelector('#fx').onsubmit = ev => { ev.preventDefault(); const F = ev.target; const n = clone(E()); n.feriados = [...n.feriados, { d: F.anual.checked ? F.d.value.slice(5) : F.d.value, nome: F.nome.value.trim() }]; n.feriados.sort((a, b) => a.d.slice(-5).localeCompare(b.d.slice(-5))); salvarEstrutura(n); f.fechar(); toast('Feriado adicionado'); };
+};
+ACOES.rmFeriado = d => { const n = clone(E()); n.feriados = n.feriados.filter((_, i) => i !== +d.i); salvarEstrutura(n); };
 ACOES.cadLocal = () => { const f = folha('Local da obra', `<form class="form" id="fx"><label>Nome<input name="v" value="${esc(E().local)}" required></label><div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`); f.el.querySelector('#fx').onsubmit = e => { e.preventDefault(); const n = clone(E()); n.local = e.target.v.value.trim(); salvarEstrutura(n); f.fechar(); }; };
 ACOES.cadConta = d => {
   const c = E().contas.find(x => x.nome === d.nome);
