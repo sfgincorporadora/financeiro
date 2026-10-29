@@ -44,6 +44,11 @@ function lotesDosAcordos() {
   if (dem) for (const q of E().quadras) for (const l of lotesDe(q)) if (!dono[q + '|' + l]) dono[q + '|' + l] = dem.id;
   return dono;
 }
+/* Investidor com cota no acordo: a cota dele sai do resultado antes da divisão principal
+   e é repartida pela divisão própria (ex.: Antônio 60% / Luis 40%); o restante segue a divisão do acordo. */
+const invDe = a => a.inv && a.inv.socio && +a.inv.cota ? a.inv : null;
+function pctEfetivo(a, sid) { const inv = invDe(a); const c = inv ? +inv.cota / 100 : 0;
+  return (1 - c) * ((+(a.partes || {})[sid] || 0) / 100) + c * ((+((inv && inv.div) || {})[sid] || 0) / 100); }
 function calcSocios() {
   const adm = !!cfgSocios().adm; const RL = resultadoLotes(adm); const dono = lotesDosAcordos();
   const res = acordos().map(a => { const ks = Object.keys(dono).filter(k => dono[k] === a.id); const qs = [...new Set(ks.map(k => k.split('|')[0]))];
@@ -53,8 +58,8 @@ function calcSocios() {
     const ts = S.list.filter(t => ehAporteSocio(t) && socioDe(t) === s.id);
     const ent = sum(ts.filter(t => pago(t) && t.valor > 0), t => t.valor), sai = sum(ts.filter(t => pago(t) && t.valor < 0), t => t.valor);
     const prev = sum(ts.filter(t => !pago(t)), t => t.valor);
-    const conc = sum(res, r => r.conc * (+(r.a.partes || {})[s.id] || 0) / 100);
-    const real = sum(res, r => r.real * (+(r.a.partes || {})[s.id] || 0) / 100), proj = sum(res, r => r.proj * (+(r.a.partes || {})[s.id] || 0) / 100);
+    const conc = sum(res, r => r.conc * pctEfetivo(r.a, s.id));
+    const real = sum(res, r => r.real * pctEfetivo(r.a, s.id)), proj = sum(res, r => r.proj * pctEfetivo(r.a, s.id));
     return { s, ts, ent, sai, liq: ent + sai, prev, real, proj, conc, pos: ent + sai + real, posHoje: ent + sai + conc, posProj: ent + sai + prev + proj };
   });
   const totLiq = sum(so.filter(x => x.liq > 0), x => x.liq);
@@ -93,7 +98,8 @@ VIEWS.socios = {
       <label class="chk"><input type="checkbox" id="sAdm" ${C.adm ? 'checked' : ''}> Descontar do resultado das quadras a administração rateada (despesas da empresa)</label></div>
       <div class="card"><h2>Acordos de divisão do resultado <button class="btn sm primary rw" data-act="acordoEd">Novo acordo</button></h2>
       ${C.res.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Acordo</th><th class="l">Quadras</th><th class="l">Divisão</th><th>Resultado realizado</th><th>Resultado projetado</th><th></th></tr></thead><tbody>
-      ${C.res.map(r => `<tr><td class="l"><b>${esc(r.a.nome || 'Acordo')}</b></td><td class="l wrap">${r.rs.length ? esc(r.rs.map(x => x.n < x.total ? `${x.q} (${x.n} de ${x.total} lotes)` : x.q).join(', ')) : '<span style="color:var(--warn)">defina as quadras ou lotes</span>'}${r.a.escopo === 'demais' ? ' <span class="muted small">(demais)</span>' : ''}</td><td class="l wrap">${Object.entries(r.a.partes || {}).filter(([, p]) => +p).map(([id, p]) => `${esc((listaSocios().find(s => s.id === id) || {}).nome || '?')} ${p}%`).join(' · ')}</td><td class="${cls(r.real)}">${brl(r.real)}</td><td class="${cls(r.proj)}">${brl(r.proj)}</td><td><button class="btn sm link rw" data-act="acordoEd" data-id="${esc(r.a.id)}">Editar</button></td></tr>`).join('')}</tbody></table></div>
+      ${C.res.map(r => `<tr><td class="l"><b>${esc(r.a.nome || 'Acordo')}</b></td><td class="l wrap">${r.rs.length ? esc(r.rs.map(x => x.n < x.total ? `${x.q} (${x.n} de ${x.total} lotes)` : x.q).join(', ')) : '<span style="color:var(--warn)">defina as quadras ou lotes</span>'}${r.a.escopo === 'demais' ? ' <span class="muted small">(demais)</span>' : ''}</td><td class="l wrap">${(() => { const nm = id => esc((listaSocios().find(s => s.id === id) || {}).nome || '?'); const fx = o => Object.entries(o || {}).filter(([, p]) => +p).map(([id, p]) => `${nm(id)} ${p}%`).join(' · '); const inv = invDe(r.a);
+        return inv ? `<b>Cota de ${nm(inv.socio)}: ${String(inv.cota).replace('.', ',')}%</b> do resultado → ${fx(inv.div)}<br>Restante (${(100 - inv.cota).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%) → ${fx(r.a.partes)}` : fx(r.a.partes); })()}</td><td class="${cls(r.real)}">${brl(r.real)}</td><td class="${cls(r.proj)}">${brl(r.proj)}</td><td><button class="btn sm link rw" data-act="acordoEd" data-id="${esc(r.a.id)}">Editar</button></td></tr>`).join('')}</tbody></table></div>
       <details class="mt"><summary class="small">Resultado por quadra</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th class="l">Acordo</th><th>Lotes</th><th>Recebido</th><th>Pago</th><th>Realizado</th><th>Projetado</th></tr></thead><tbody>${C.res.flatMap(r => r.rs.map(q => `<tr><td class="l">${esc(q.q)}</td><td class="l">${esc(r.a.nome || '')}</td><td>${q.n < q.total ? q.n + ' de ' + q.total : q.n}</td><td class="pos">${brl(q.rec)}</td><td class="neg">${brl(q.custo)}</td><td class="${cls(q.real)}">${brl(q.real)}</td><td class="${cls(q.proj)}">${brl(q.proj)}</td></tr>`)).join('')}</tbody></table></div></details>`
       : '<p class="muted">Nenhum acordo ainda. Crie um acordo por grupo de quadras com a divisão entre os sócios (ex.: quadras K1, Q1, U1 e Y1: 30% / 70%; demais quadras: 50% / 50%).</p>'}</div>
       ${C.semSocio.length ? `<div class="card"><h2>Aportes sem sócio identificado <span class="muted small">${C.semSocio.length} lançamento(s), ${brl(sum(C.semSocio, t => t.valor))}</span></h2><p class="muted small">Escolha de qual sócio é cada grupo. O app reconhece sozinho descrições como "Aporte Eduardo" ou o nome do sócio no campo fornecedor.</p>
@@ -122,14 +128,30 @@ ACOES.acordoEd = d => {
     <div class="lbl">Divisão do resultado (%)</div>
     <div class="g3">${listaSocios().map(s => `<label>${esc(s.nome)}<input name="p_${esc(s.id)}" inputmode="decimal" value="${esc(String((a.partes || {})[s.id] || ''))}" placeholder="0"></label>`).join('')}</div>
     <p class="hint-data" id="pSum"></p>
+    <details class="inv-box" ${invDe(a) ? 'open' : ''}><summary><b>Investidor com cota neste acordo</b> <span class="muted small">(opcional)</span></summary>
+      <p class="muted small">Use quando um sócio investiu numa operação e tem direito a uma fatia do resultado dela. Essa fatia (a cota) sai do resultado antes da divisão acima e é repartida pela divisão própria dele; o restante segue a divisão acima.</p>
+      <div class="g2"><label>Investidor<select name="invS">${opts(listaSocios().map(s => [s.id, s.nome]), (a.inv || {}).socio || '', 'Nenhum')}</select></label><label>Cota do resultado (%)<input name="invC" inputmode="decimal" value="${esc(String((a.inv || {}).cota || '').replace('.', ','))}" placeholder="Ex.: 7,2"></label></div>
+      <div class="acts left"><button type="button" class="btn sm" id="sugCap">Calcular pelo capital investido</button><button type="button" class="btn sm" id="sugRet">Calcular pelo que ele já retirou</button></div>
+      <p class="hint-data info" id="invHint"></p>
+      <div class="lbl">Divisão da cota (%)</div>
+      <div class="g3">${listaSocios().map(s => `<label>${esc(s.nome)}<input name="iv_${esc(s.id)}" inputmode="decimal" value="${esc(String(((a.inv || {}).div || {})[s.id] || ''))}" placeholder="0"></label>`).join('')}</div>
+    </details>
     <div class="acts">${d.id ? '<button type="button" class="btn danger ghost" id="rm">Remover</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fx');
   const soma = () => { const t = sum(listaSocios(), s => parseBR(F['p_' + s.id].value) || 0); $('#pSum', F).textContent = `Total ${t.toLocaleString('pt-BR')}%${Math.abs(t - 100) > 0.01 ? ' (precisa somar 100%)' : ''}`; return t; };
   const esc_ = () => { $('#qBox', F).classList.toggle('hidden', F.esc.value !== 'quadras'); $('#lBox', F).classList.toggle('hidden', F.esc.value !== 'lotes'); };
   F.addEventListener('input', soma); F.esc.onchange = esc_; soma(); esc_();
+  /* Resultado e custo das quadras/lotes marcados no formulário, para sugerir a cota. */
+  const escopoForm = () => { const RL = resultadoLotes(!!cfgSocios().adm); const ks = F.esc.value === 'quadras' ? $$('[name=qs]:checked', F).flatMap(x => lotesDe(x.value).map(l => x.value + '|' + l)) : F.esc.value === 'lotes' ? $$('[name=ls]:checked', F).map(x => x.value) : []; const xs = ks.map(k => RL[k]).filter(Boolean); return { custo: -sum(xs, x => x.custo), proj: sum(xs, x => x.proj) }; };
+  const movInv = () => { const sid = F.invS.value; const ts = S.list.filter(t => ehAporteSocio(t) && socioDe(t) === sid && pago(t)); return { ent: sum(ts.filter(t => t.valor > 0), t => t.valor), sai: -sum(ts.filter(t => t.valor < 0), t => t.valor) }; };
+  const pctNum = v => String(Math.round(v * 1e4) / 1e4).replace('.', ',');
+  $('#sugCap', F).onclick = () => { if (!F.invS.value) { toast('Escolha o investidor.', 'err'); return; } const m = movInv(), e = escopoForm(); if (!e.custo) { toast('Marque as quadras do acordo.', 'err'); return; } const c = m.ent / e.custo * 100; F.invC.value = pctNum(c); $('#invHint', F).textContent = `Aportou ${brl(m.ent)} de um custo total de ${brl(e.custo)} nessas quadras: cota de ${pctNum(c)}%.`; };
+  $('#sugRet', F).onclick = () => { if (!F.invS.value) { toast('Escolha o investidor.', 'err'); return; } const m = movInv(), e = escopoForm(); const pi = (parseBR(F['iv_' + F.invS.value].value) || 0) / 100; if (!pi) { toast('Preencha primeiro a % do investidor na divisão da cota.', 'err'); return; } if (!e.proj) { toast('Marque as quadras do acordo.', 'err'); return; }
+    const ganho = m.sai - m.ent; const c = ganho / pi / e.proj * 100; F.invC.value = pctNum(c); $('#invHint', F).textContent = `Retirou ${brl(m.sai)} e aportou ${brl(m.ent)}: recebeu ${brl(ganho)} de resultado, que são ${Math.round(pi * 100)}% da cota. Cota = ${brl(ganho / pi)} ÷ resultado projetado de ${brl(e.proj)} = ${pctNum(c)}%.`; };
   F.onsubmit = e => { e.preventDefault(); if (Math.abs(soma() - 100) > 0.01) { toast('A divisão precisa somar 100%.', 'err'); return; }
+    let inv = null; if (F.invS.value && parseBR(F.invC.value) > 0) { const div = {}; listaSocios().forEach(s => { const v = parseBR(F['iv_' + s.id].value) || 0; if (v) div[s.id] = v; }); if (Math.abs(sum(Object.values(div), v => v) - 100) > 0.01) { toast('A divisão da cota precisa somar 100%.', 'err'); return; } inv = { socio: F.invS.value, cota: parseBR(F.invC.value), div }; }
     const partes = {}; listaSocios().forEach(s => { const v = parseBR(F['p_' + s.id].value) || 0; if (v) partes[s.id] = v; });
-    const n = { id: a.id || uid(), nome: F.nome.value.trim() || (F.esc.value === 'demais' ? 'Demais quadras' : 'Acordo'), escopo: F.esc.value, quadras: F.esc.value === 'quadras' ? $$('[name=qs]:checked', F).map(x => x.value) : [], lotes: F.esc.value === 'lotes' ? $$('[name=ls]:checked', F).map(x => x.value) : [], partes };
+    const n = { id: a.id || uid(), nome: F.nome.value.trim() || (F.esc.value === 'demais' ? 'Demais quadras' : 'Acordo'), escopo: F.esc.value, quadras: F.esc.value === 'quadras' ? $$('[name=qs]:checked', F).map(x => x.value) : [], lotes: F.esc.value === 'lotes' ? $$('[name=ls]:checked', F).map(x => x.value) : [], partes, inv };
     salvarSocios({ acordos: d.id ? acordos().map(x => x.id === a.id ? n : x) : [...acordos(), n] }); f.fechar(); };
   const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { salvarSocios({ acordos: acordos().filter(x => x.id !== a.id) }); f.fechar(); };
 };
