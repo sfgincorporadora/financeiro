@@ -107,9 +107,15 @@ const E = () => {
     lotes: e.lotes || {},
     destinos: e.destinos || DEST_PADRAO,
     contas: e.contas && e.contas.length ? e.contas : [{ nome: 'BTG', inicial: 0 }, { nome: 'Caixa', inicial: 0 }],
-    feriados: e.feriados || []
+    feriados: e.feriados || [],
+    obras: e.obras && e.obras.length ? e.obras : [e.local || 'Nova Juazeiro'],
+    quadraObra: e.quadraObra || {}
   };
 };
+const obraDe = q => { const e = E(); const o = e.quadraObra[q]; return o && e.obras.includes(o) ? o : e.obras[0]; };
+const obraT = t => t.quadra && t.quadra !== '-' && E().quadras.includes(t.quadra) ? obraDe(t.quadra) : (t.local || E().obras[0]);
+const variasObras = () => E().obras.length > 1;
+const quadrasDaObra = o => E().quadras.filter(q => !o || obraDe(q) === o);
 function secaoDe(dest) { const d = E().destinos; for (const s of ['op', 'nonop', 'rec', 'aporte']) if ((d[s] || []).includes(dest)) return s; return dest === 'Aporte' ? 'aporte' : 'nonop'; }
 const todosDestinos = () => { const d = E().destinos; return [...(d.op || []), ...(d.nonop || []), ...(d.rec || []), ...(d.aporte || [])]; };
 const lotesDe = q => (E().lotes[q] || []).slice().sort(lotSort);
@@ -405,7 +411,8 @@ function confirmar(msg, ok = 'Confirmar', perigo = true) {
 }
 const opts = (arr, sel, vazio) => (vazio !== undefined ? `<option value="">${esc(vazio)}</option>` : '') + arr.map(x => { const [v, l] = Array.isArray(x) ? x : [x, x]; return `<option value="${esc(v)}" ${String(v) === String(sel) ? 'selected' : ''}>${esc(l)}</option>`; }).join('');
 const optsDestino = sel => ['op', 'nonop', 'rec', 'aporte'].map(s => { const ds = E().destinos[s] || []; return ds.length ? `<optgroup label="${SECAO_NOME[s]}">${opts(ds, sel)}</optgroup>` : ''; }).join('');
-const quadrasOpts = () => [['-', 'Geral / administrativo (-)'], ...E().quadras.map(q => [q, 'Quadra ' + q])];
+const quadrasOpts = () => [['-', 'Geral / administrativo (-)'], ...E().quadras.map(q => [q, 'Quadra ' + q + (variasObras() ? ' · ' + obraDe(q) : '')])];
+const campoObra = sel => variasObras() ? `<label>Obra<select name="obra">${opts(E().obras, sel || E().obras[0])}</select></label>` : '';
 
 /* ---------- Novo lançamento ---------- */
 function formNovo(def = {}) {
@@ -418,6 +425,7 @@ function formNovo(def = {}) {
       <label>Destino<select name="destino" required>${optsDestino(def.destino || (def.tipo === 'entrada' ? 'Venda' : 'Material'))}</select></label></div>
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required placeholder="0,00" value="${def.valor ? fNum2.format(Math.abs(def.valor)) : ''}"></label>
       <label>O valor informado é<select name="modo"><option value="total">Total (dividir entre lotes e parcelas)</option><option value="cada">De cada lançamento</option></select></label></div>
+    ${campoObra(def.quadra && def.quadra !== '-' ? obraDe(def.quadra) : '')}
     <div class="g2"><label>Quadra<select name="quadra">${opts(quadrasOpts(), def.quadra || '-')}</select></label>
       <label>Vencimento${'<input type="date" name="venc" required value="' + (def.venc || h) + '">'}</label></div>
     <div id="boxLotes"></div>
@@ -486,7 +494,7 @@ function formNovo(def = {}) {
         let item = base + (n > 1 ? ` (${i + 1}/${n})` : '') + (l !== '-' ? ` - ${q} ${l}` : (q !== '-' ? ` - ${q}` : ''));
         const valor = (tipo === 'saida' ? -1 : 1) * valores[k++];
         if (!valor) continue;
-        const t = { id: uid(), item, valor, juros: 0, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: E().local, quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
+        const t = { id: uid(), item, valor, juros: 0, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: q !== '-' ? obraDe(q) : (F.obra ? F.obra.value : E().obras[0]), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
         if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
         if (venc !== parc[i].d) t.vencOrig = parc[i].d;
         const qt = parseBR(F.qtd.value); if (qt > 0) { t.qtd = Math.round((F.modo.value === 'cada' ? qt : qt / total) * 1000) / 1000; t.unid = F.unid.value.trim(); }
@@ -504,7 +512,8 @@ function formNovo(def = {}) {
     if (!g.lista.length) { p.innerHTML = '<span class="muted">Informe valores maiores que zero.</span>'; return; }
     p.innerHTML = `<b>${g.total} lançamento${g.total > 1 ? 's' : ''}</b>, total <b class="${cls(tot)}">${brl2(tot)}</b>${g.ajustes ? `, ${g.ajustes} vencimento(s) passado(s) para dia útil` : ''}<br><span class="muted">Primeiro: ${esc(g.lista[0].item)}, ${brl2(g.lista[0].valor)}, vence ${dCurtoSem(g.lista[0].venc)}${g.total > 1 ? `. Último vence ${dCurtoSem(g.lista[g.lista.length - 1].venc)}` : ''}</span>`;
   };
-  F.quadra.onchange = () => { lotesBox(); recalcParc(); prev(); };
+  F.quadra.onchange = () => { if (F.obra && F.quadra.value !== '-') F.obra.value = obraDe(F.quadra.value); lotesBox(); recalcParc(); prev(); };
+  if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; lotesBox(); recalcParc(); prev(); } };
   F.realizado.onchange = () => { real(); prev(); };
   F.addEventListener('input', prev); F.addEventListener('change', prev);
   lotesBox(); real(); recalcParc(); prev();
@@ -526,6 +535,7 @@ function formEditar(t) {
     <div class="g2"><label>Fornecedor / cliente<input name="forn" value="${esc(t.forn || '')}"></label><label>Destino<select name="destino">${optsDestino(t.destino)}${todosDestinos().includes(t.destino) ? '' : `<option selected>${esc(t.destino)}</option>`}</select></label></div>
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required value="${fNum2.format(Math.abs(t.valor))}"></label><label>Vencimento<input type="date" name="venc" required value="${esc(t.venc)}"></label></div>
     <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Se cair em fim de semana ou feriado, passar para o próximo dia útil</label><p class="hint-data" id="edHint"></p>
+    ${campoObra(obraT(t))}
     <div class="g2"><label>Quadra<select name="quadra">${opts(quadrasOpts(), t.quadra || '-')}${(t.quadra && t.quadra !== '-' && !E().quadras.includes(t.quadra)) ? `<option selected>${esc(t.quadra)}</option>` : ''}</select></label>
       <label>Lote<select name="lote">${opts([['-', 'Sem lote (-)'], ...lots], t.lote || '-')}${(t.lote && t.lote !== '-' && !lots.includes(t.lote)) ? `<option selected>${esc(t.lote)}</option>` : ''}</select></label></div>
     ${pago(t) ? `<div class="g3"><label>Pago em<input type="date" name="pag" value="${esc(t.pag || t.venc)}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), t.conta)}</select></label><label>Juros/multa (R$)<input name="juros" inputmode="decimal" value="${t.juros ? fNum2.format(Math.abs(t.juros)) : ''}"></label></div>` : ''}
@@ -537,11 +547,12 @@ function formEditar(t) {
   $$('#segTipo button', F).forEach(b => b.onclick = () => { tipo = b.dataset.v; $$('#segTipo button', F).forEach(x => x.classList.toggle('on', x === b)); });
   const edHint = () => { const m = motivoNaoUtil(F.venc.value); $('#edHint', F).textContent = m ? (F.util.checked ? `Cai em ${m}: será salvo para ${dCurtoSem(proximoDiaUtil(F.venc.value))}.` : `Cai em ${m}.`) : ''; };
   F.venc.oninput = edHint; F.util.onchange = () => { setPrefUtil(F.util.checked); edHint(); }; edHint();
-  F.quadra.onchange = () => { const q = F.quadra.value; F.lote.innerHTML = opts([['-', 'Sem lote (-)'], ...(q === '-' ? [] : lotesDe(q))], '-'); };
+  F.quadra.onchange = () => { const q = F.quadra.value; if (F.obra && q !== '-') F.obra.value = obraDe(q); F.lote.innerHTML = opts([['-', 'Sem lote (-)'], ...(q === '-' ? [] : lotesDe(q))], '-'); };
+  if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; F.quadra.onchange(); } };
   F.onsubmit = e => {
     e.preventDefault(); const v = parseBR(F.valor.value); if (!(v >= 0)) { toast('Valor inválido', 'err'); return; }
     const sg = tipo === 'saida' ? -1 : 1;
-    const n = { ...t, item: F.item.value.trim(), forn: F.forn.value.trim(), destino: F.destino.value, valor: sg * v, venc: F.util.checked ? proximoDiaUtil(F.venc.value) : F.venc.value, quadra: F.quadra.value, lote: F.lote.value, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), obs: F.obs.value.trim() };
+    const n = { ...t, item: F.item.value.trim(), forn: F.forn.value.trim(), destino: F.destino.value, valor: sg * v, venc: F.util.checked ? proximoDiaUtil(F.venc.value) : F.venc.value, quadra: F.quadra.value, local: F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : (t.local || E().obras[0])), lote: F.lote.value, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), obs: F.obs.value.trim() };
     { const qt = parseBR(F.qtd.value); if (qt > 0) { n.qtd = qt; n.unid = F.unid.value.trim(); } else { delete n.qtd; delete n.unid; } }
     if (pago(t)) { n.pag = F.pag.value; n.conta = F.conta.value; const j = parseBR(F.juros.value); n.juros = j > 0 ? sg * j : 0; }
     salvarTitulos([n]); f.fechar(); toast('Alteração salva');
@@ -885,7 +896,7 @@ VIEWS.inicio = {
 };
 
 function viewLista(modo) {
-  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', quadra: '', dest: '', conta: '', ini: '', fim: '' };
+  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', obra: '', quadra: '', dest: '', conta: '', ini: '', fim: '' };
   let selMode = false, limite = 200, agrup = true;
   const per = modo === 'extrato'
     ? [['mes', 'Este mês'], ['mesant', 'Mês passado'], ['30d', 'Últimos 30 dias'], ['ano', 'Este ano'], ['todos', 'Tudo'], ['custom', 'Período…']]
@@ -899,13 +910,14 @@ function viewLista(modo) {
         ${modo !== 'extrato' ? `<select id="fst">${opts([['aberto', 'Em aberto'], ['pago', modo === 'pagar' ? 'Pagas' : 'Recebidas'], ['todos', 'Todas']], F.st)}</select>` : `<select id="fconta">${opts(E().contas.map(c => c.nome), F.conta, 'Todas as contas')}</select>`}
         <select id="fper">${opts(per, F.per)}</select>
         <span id="fcustom" class="${F.per === 'custom' ? '' : 'hidden'}"><input type="date" id="fini" value="${F.ini}"> até <input type="date" id="ffim" value="${F.fim}"></span>
+        ${variasObras() ? `<select id="fobra">${opts(E().obras, F.obra, 'Todas as obras')}</select>` : ''}
         <select id="fquadra">${opts(quadrasOpts().map(([v, l]) => [v, l.replace('Quadra ', '')]), F.quadra, 'Todas as quadras')}</select>
         <select id="fdest">${opts(todosDestinos(), F.dest, 'Todos os destinos')}</select>
         <label class="tgl"><input type="checkbox" id="fgrp" ${agrup ? 'checked' : ''}> Agrupar lotes</label>
         ${modo !== 'extrato' ? `<button class="btn" id="bSel">Selecionar</button>` : ''}
       </div><div id="lsaldo"></div><div class="card"><div id="ltot" class="ltot"></div><div id="lrows" class="tlist"></div><div id="lmore"></div></div><div id="selbar" class="selbar hidden"></div>`;
       const bind = (id, k, ev = 'change') => $('#' + id, el)?.addEventListener(ev, e => { F[k] = e.target.value; limite = 200; if (k === 'per') $('#fcustom', el).classList.toggle('hidden', F.per !== 'custom'); this.refresh(el); });
-      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('fquadra', 'quadra'); bind('fdest', 'dest');
+      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('fobra', 'obra'); bind('fquadra', 'quadra'); bind('fdest', 'dest');
       $('#fgrp', el).onchange = e => { agrup = e.target.checked; limite = 200; this.refresh(el); };
       const bs = $('#bSel', el); if (bs) bs.onclick = () => { selMode = !selMode; listaSel.clear(); bs.classList.toggle('on', selMode); bs.textContent = selMode ? 'Cancelar seleção' : 'Selecionar'; this.refresh(el); };
     },
@@ -927,7 +939,7 @@ function viewLista(modo) {
         if (modo === 'receber' && !(t.valor > 0)) return false;
         if (st === 'aberto' && pago(t)) return false; if (st === 'pago' && !pago(t)) return false;
         if (F.per === 'vencidas' && pago(t)) return false;
-        if (F.quadra && t.quadra !== F.quadra) return false; if (F.dest && t.destino !== F.dest) return false;
+        if (F.obra && obraT(t) !== F.obra) return false; if (F.quadra && t.quadra !== F.quadra) return false; if (F.dest && t.destino !== F.dest) return false;
         if (F.conta && t.conta !== F.conta) return false;
         if (q && !(t.item.toLowerCase().includes(q) || (t.forn || '').toLowerCase().includes(q) || (t.obs || '').toLowerCase().includes(q) || (t.nfNum || '').includes(q))) return false;
         return okPer(campo === 'pag' ? (t.pag || t.venc) : t.venc);
@@ -936,7 +948,7 @@ function viewLista(modo) {
       rows.sort((a, b) => { const x = (campo === 'pag' ? (a.pag || a.venc) : a.venc) || '', y = (campo === 'pag' ? (b.pag || b.venc) : b.venc) || ''; return desc ? y.localeCompare(x) || (b.criado || 0) - (a.criado || 0) : x.localeCompare(y) || (a.criado || 0) - (b.criado || 0); });
       // saldo corrido no extrato
       let saldoMap = null;
-      if (modo === 'extrato' && !q && !F.quadra && !F.dest) {
+      if (modo === 'extrato' && !q && !F.obra && !F.quadra && !F.dest) {
         const sd = saldos(); let s = F.conta ? (E().contas.find(c => c.nome === F.conta)?.inicial || 0) : sum(E().contas, c => +c.inicial || 0);
         const all = S.list.filter(t => pago(t) && (!F.conta || t.conta === F.conta)).sort((a, b) => (a.pag || a.venc || '').localeCompare(b.pag || b.venc || '') || (a.criado || 0) - (b.criado || 0));
         saldoMap = new Map(); for (const t of all) { s += t.valor + (t.juros || 0); saldoMap.set(t.id, s); }
@@ -983,12 +995,17 @@ VIEWS.obras = {
   titulo: a => a.length === 2 ? `Quadra ${a[0]}, lote ${a[1]}` : a.length === 1 ? 'Quadra ' + a[0] : 'Quadras e lotes',
   refresh(el, a) { if (a.length === 2) return obraLote(el, a[0], a[1]); if (a.length === 1) return obraQuadra(el, a[0]); return obrasResumo(el); }
 };
+let obraVista = '';
+ACOES.obraVista = d => { obraVista = d.o || ''; refreshView(); };
 function obrasResumo(el) {
-  const rows = E().quadras.map(resumoQuadra); const T = k => sum(rows, r => r[k]);
+  if (obraVista && !E().obras.includes(obraVista)) obraVista = '';
+  const qsV = quadrasDaObra(obraVista);
+  const rows = qsV.map(resumoQuadra); const T = k => sum(rows, r => r[k]);
   const lotesQ = q => lotesDe(q).map(l => infoVendaLote(q, l));
-  const todos = E().quadras.flatMap(lotesQ);
+  const todos = qsV.flatMap(lotesQ);
+  const seletor = variasObras() ? `<nav class="seg obras-seg" aria-label="Obra">${[['', 'Todas as obras'], ...E().obras.map(o => [o, o])].map(([v, l]) => `<button class="${v === obraVista ? 'on' : ''}" data-act="obraVista" data-o="${esc(v)}">${esc(l)}</button>`).join('')}</nav>` : '';
   const n = { rec: todos.filter(x => x.etapa === 'recebido').length, disp: todos.filter(x => x.etapa === 'disp').length }; n.and = todos.length - n.rec - n.disp;
-  el.innerHTML = `<section class="obras-cab"><div><p class="eh-lab">${esc(E().local)}</p><p class="eh-val fig">${T('n')} lotes em ${E().quadras.length} quadras</p></div>
+  el.innerHTML = `${seletor}<section class="obras-cab"><div><p class="eh-lab">${esc(obraVista || (variasObras() ? 'Todas as obras' : E().local))}</p><p class="eh-val fig">${T('n')} lotes em ${qsV.length} quadra${qsV.length === 1 ? '' : 's'}</p></div>
     <div class="eh-fatos"><div><span class="k">Resultado projetado</span><span class="v fig ${cls(T('proj'))}">${short(T('proj'))}</span><small>previsto ${short(T('prevRes'))}</small></div><div><span class="k">A receber de vendas</span><span class="v fig pos">${short(T('receber'))}</span><small>${n.and} lotes vendidos a receber</small></div><div><span class="k">A pagar nas obras</span><span class="v fig">${short(T('pagar'))}</span><small>já pago ${short(T('custo'))}</small></div></div></section>
   <section class="painel mapa"><div class="painel-cab"><h2>Mapa de lotes</h2><p class="legenda"><span><i class="lt rec"></i>Repasse recebido (${n.rec})</span><span><i class="lt and"></i>Vendido, a receber (${n.and})</span><span><i class="lt disp"></i>Disponível (${n.disp})</span></p></div>
     ${rows.map(r => { const ls = lotesQ(r.q); const ov = r.prevCusto ? (r.custo + r.pagar) / r.prevCusto : null; return `<div class="mq">
@@ -1118,12 +1135,13 @@ VIEWS.cadastros = {
   refresh(el) {
     const e = E();
     el.innerHTML = `<div class="grid two">
-      <div class="card"><h2>Obra</h2><div class="kv"><span>Local</span><b>${esc(e.local)}</b><button class="btn sm" data-act="cadLocal">Alterar</button></div></div>
+      <div class="card"><h2>Obras <button class="btn sm rw" data-act="cadObra">Nova obra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Obra</th><th>Quadras</th><th>Lançamentos</th><th></th></tr></thead><tbody>
+        ${e.obras.map(o => `<tr><td class="l"><b>${esc(o)}</b></td><td>${quadrasDaObra(o).length}</td><td>${S.list.filter(x => obraT(x) === o).length}</td><td><button class="btn sm rw" data-act="cadObra" data-o="${esc(o)}">Editar</button></td></tr>`).join('')}</tbody></table></div></div>
       <div class="card"><h2>Contas bancárias <button class="btn sm" data-act="cadConta">Adicionar</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Conta</th><th>Saldo inicial</th><th>Saldo atual</th><th></th></tr></thead><tbody>
         ${saldos().contas.map(c => `<tr><td class="l"><b>${esc(c.nome)}</b></td><td>${brl2(c.inicial)}</td><td class="${cls(c.saldo)}">${brl2(c.saldo)}</td><td>${e.contas.some(x => x.nome === c.nome) ? `<button class="btn sm" data-act="cadConta" data-nome="${esc(c.nome)}">Editar</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>
     </div>
-    <div class="card"><h2>Quadras e lotes <button class="btn sm" data-act="cadQuadra">Adicionar quadra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th>Lotes</th><th class="l">Numeração</th><th>Lançamentos</th><th></th></tr></thead><tbody>
-      ${e.quadras.map(q => { const ls = lotesDe(q); return `<tr><td class="l"><b>${esc(q)}</b></td><td>${ls.length}</td><td class="l wrap muted small">${esc(ls.slice(0, 30).join(', '))}${ls.length > 30 ? '…' : ''}</td><td>${usados('quadra', q)}</td><td><button class="btn sm" data-act="cadQuadra" data-q="${esc(q)}">Editar</button></td></tr>`; }).join('')}</tbody></table></div></div>
+    <div class="card"><h2>Quadras e lotes <button class="btn sm" data-act="cadQuadra">Adicionar quadra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th>${variasObras() ? '<th class="l">Obra</th>' : ''}<th>Lotes</th><th class="l">Numeração</th><th>Lançamentos</th><th></th></tr></thead><tbody>
+      ${e.quadras.map(q => { const ls = lotesDe(q); return `<tr><td class="l"><b>${esc(q)}</b></td>${variasObras() ? `<td class="l">${esc(obraDe(q))}</td>` : ''}<td>${ls.length}</td><td class="l wrap muted small">${esc(ls.slice(0, 30).join(', '))}${ls.length > 30 ? '…' : ''}</td><td>${usados('quadra', q)}</td><td><button class="btn sm" data-act="cadQuadra" data-q="${esc(q)}">Editar</button></td></tr>`; }).join('')}</tbody></table></div></div>
     <div class="card"><h2>Destinos (categorias)</h2><div class="grid two">${['op', 'nonop', 'rec', 'aporte'].map(s => `<div><div class="lbl">${SECAO_NOME[s]} <button class="btn link sm" data-act="cadDest" data-s="${s}">+ adicionar</button></div><div class="chips">${(e.destinos[s] || []).map(d => `<span class="chip">${esc(d)} <button class="x" data-act="rmDest" data-s="${s}" data-d="${esc(d)}" aria-label="Remover">×</button></span>`).join('')}</div></div>`).join('')}</div></div>
     <div class="card"><h2>Feriados <button class="btn sm rw" data-act="cadFeriado">Adicionar feriado local</button></h2>
       <p class="muted small">Vencimentos que caem nestes dias (ou em fins de semana) vão para o próximo dia útil. Os feriados nacionais, inclusive Carnaval, Sexta-feira Santa e Corpus Christi, já são calculados todo ano. Inclua os feriados de Juazeiro e da Bahia que afetam os seus pagamentos.</p>
@@ -1138,6 +1156,28 @@ ACOES.cadFeriado = () => {
   f.el.querySelector('#fx').onsubmit = ev => { ev.preventDefault(); const F = ev.target; const n = clone(E()); n.feriados = [...n.feriados, { d: F.anual.checked ? F.d.value.slice(5) : F.d.value, nome: F.nome.value.trim() }]; n.feriados.sort((a, b) => a.d.slice(-5).localeCompare(b.d.slice(-5))); salvarEstrutura(n); f.fechar(); toast('Feriado adicionado'); };
 };
 ACOES.rmFeriado = d => { const n = clone(E()); n.feriados = n.feriados.filter((_, i) => i !== +d.i); salvarEstrutura(n); };
+ACOES.cadObra = d => {
+  const o = d.o; const e = E();
+  const nQ = o ? quadrasDaObra(o).length : 0, nT = o ? S.list.filter(x => obraT(x) === o).length : 0;
+  const pode = o && e.obras.length > 1 && !nQ && !nT;
+  const f = folha(o ? 'Obra ' + o : 'Nova obra', `<form class="form" id="fx"><label>Nome da obra (local)<input name="v" value="${esc(o || '')}" required placeholder="Ex.: Araripina"></label>
+    ${o ? `<p class="muted small">${nQ} quadra(s) e ${nT} lançamento(s) nesta obra. Ao renomear, os lançamentos passam a usar o novo nome.${e.obras.length > 1 && !pode ? ' Para remover, a obra não pode ter quadras nem lançamentos.' : ''}</p>` : '<p class="muted small">Depois de criar, cadastre as quadras e lotes dela em Quadras e lotes, escolhendo esta obra.</p>'}
+    <div class="acts">${pode ? '<button type="button" class="btn danger ghost" id="rm">Remover obra</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
+  const F = f.el.querySelector('#fx');
+  F.onsubmit = async ev => {
+    ev.preventDefault(); const nome = F.v.value.trim(); const n = clone(E());
+    if (!nome) return; if (nome !== o && n.obras.some(x => x.toLowerCase() === nome.toLowerCase())) { toast('Essa obra já existe', 'err'); return; }
+    if (!o) n.obras.push(nome);
+    else if (nome !== o) {
+      n.obras = n.obras.map(x => x === o ? nome : x);
+      for (const q in n.quadraObra) if (n.quadraObra[q] === o) n.quadraObra[q] = nome;
+      const mud = S.list.filter(x => obraT(x) === o && x.local !== nome).map(x => ({ ...x, local: nome, alterado: Date.now() }));
+      if (mud.length) salvarTitulos(mud);
+    }
+    n.local = n.obras[0]; salvarEstrutura(n); f.fechar(); toast(o ? 'Obra salva' : 'Obra criada');
+  };
+  const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { const n = clone(E()); n.obras = n.obras.filter(x => x !== o); n.local = n.obras[0]; salvarEstrutura(n); f.fechar(); };
+};
 ACOES.cadLocal = () => { const f = folha('Local da obra', `<form class="form" id="fx"><label>Nome<input name="v" value="${esc(E().local)}" required></label><div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`); f.el.querySelector('#fx').onsubmit = e => { e.preventDefault(); const n = clone(E()); n.local = e.target.v.value.trim(); salvarEstrutura(n); f.fechar(); }; };
 ACOES.cadConta = d => {
   const c = E().contas.find(x => x.nome === d.nome);
@@ -1150,10 +1190,12 @@ ACOES.cadConta = d => {
 ACOES.cadQuadra = d => {
   const q = d.q; const ls = q ? lotesDe(q) : [];
   const f = folha(q ? 'Quadra ' + q : 'Nova quadra', `<form class="form" id="fx"><label>Nome da quadra<input name="q" value="${esc(q || '')}" required ${q ? 'readonly' : ''} placeholder="Ex.: K4"></label>
+    ${variasObras() ? `<label>Obra<select name="obra">${opts(E().obras, q ? obraDe(q) : (d.o || obraVista || E().obras[0]))}</select></label>` : ''}
     <label>Lotes <span class="muted">— use vírgulas e intervalos: 1-45, 19.1, 19.2</span><textarea name="l" rows="4">${esc(ls.join(', '))}</textarea></label>
     <div class="acts">${q && !usados('quadra', q) ? '<button type="button" class="btn danger ghost" id="rm">Remover quadra</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fx');
-  F.onsubmit = e => { e.preventDefault(); const n = clone(E()); const nome = F.q.value.trim(); if (!q && n.quadras.includes(nome)) { toast('Essa quadra já existe', 'err'); return; } if (!n.quadras.includes(nome)) n.quadras.push(nome); n.lotes[nome] = expandirLotes(F.l.value); salvarEstrutura(n); f.fechar(); toast('Quadra salva'); };
+  F.onsubmit = e => { e.preventDefault(); const n = clone(E()); const nome = F.q.value.trim(); if (!q && n.quadras.includes(nome)) { toast(variasObras() ? `A quadra ${nome} já existe na obra ${obraDe(nome)}. Use outro nome, por exemplo ${nome}-${(F.obra?.value || '').slice(0, 3).toUpperCase()}.` : 'Essa quadra já existe', 'err'); return; }
+    if (F.obra) n.quadraObra[nome] = F.obra.value; if (!n.quadras.includes(nome)) n.quadras.push(nome); n.lotes[nome] = expandirLotes(F.l.value); salvarEstrutura(n); f.fechar(); toast('Quadra salva'); };
   const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { const n = clone(E()); n.quadras = n.quadras.filter(x => x !== q); delete n.lotes[q]; salvarEstrutura(n); f.fechar(); };
 };
 ACOES.cadDest = d => { const f = folha('Novo destino · ' + SECAO_NOME[d.s], `<form class="form" id="fx"><label>Nome<input name="v" required></label><div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Adicionar</button></div></form>`); f.el.querySelector('#fx').onsubmit = e => { e.preventDefault(); const v = e.target.v.value.trim(); if (todosDestinos().includes(v)) { toast('Esse destino já existe', 'err'); return; } const n = clone(E()); n.destinos[d.s] = [...(n.destinos[d.s] || []), v]; salvarEstrutura(n); f.fechar(); }; };
