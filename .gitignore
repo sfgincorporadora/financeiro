@@ -1,0 +1,11 @@
+# nunca enviar dados reais da SFG nem arquivos gerados
+fonte/node_modules
+fonte/docs/
+fonte/test/www/
+*.xlsx
+*.xls
+*.csv
+*.ofx
+*.pdf
+*.json.bak
+backup*.json

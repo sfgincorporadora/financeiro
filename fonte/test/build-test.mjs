@@ -1,0 +1,10 @@
+import { build } from 'esbuild';
+import { readFileSync, writeFileSync, mkdirSync, cpSync } from 'node:fs';
+mkdirSync('test/www/icons', { recursive: true });
+const fake = { name: 'fake', setup(b) { b.onResolve({ filter: /^firebase\/(app|auth|firestore)$/ }, () => ({ path: new URL('./fake.js', import.meta.url).pathname })); } };
+await build({ entryPoints: ['src/main.js'], bundle: true, format: 'iife', outfile: 'test/www/app.js', plugins: [fake], logLevel: 'warning' });
+writeFileSync('test/www/app.js', readFileSync('test/www/app.js', 'utf8').replaceAll('__VERSAO__', 'teste'));
+writeFileSync('test/www/index.html', readFileSync('src/index.html', 'utf8').replaceAll('__VERSAO__', 'teste'));
+cpSync('src/icons', 'test/www/icons', { recursive: true });
+cpSync('src/fonts', 'test/www/fonts', { recursive: true });
+console.log('ok');
