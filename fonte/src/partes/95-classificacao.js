@@ -76,6 +76,8 @@ ACOES.transferir = d => {
 /* ---------- Rateio gerencial da administração ---------- */
 const ehAdm = t => pago(t) && t.valor < 0 && secaoDe(t.destino) !== 'aporte' && t.destino !== 'Impostos' && (ehEmpresa(t) || (t.destino === 'Administrativo' && (!t.quadra || t.quadra === '-')));
 let _rat = { ref: null, crit: '' };
+/* Só gasto de construção marca o lote como "em obra" no mês (terreno, ITBI, cartório e registro não contam). */
+const DEST_OBRA_ATIVA = ['Mão de Obra', 'Material', 'Pavimentação', 'Operacional'];
 function rateioAdm() {
   const crit = (S.rateio && S.rateio.criterio) || 'igual';
   if (_rat.ref === S.list && _rat.crit === crit) return _rat.r;
@@ -84,7 +86,7 @@ function rateioAdm() {
   for (const t of S.list) {
     const d = (t.pag || t.venc || '').slice(0, 7); if (!d || !pago(t)) continue;
     if (ehAdm(t)) { M(d).adm += -(t.valor + Math.min(0, t.juros || 0)); continue; }
-    if (t.valor < 0 && secaoDe(t.destino) === 'op' && t.quadra && t.quadra !== '-' && E().quadras.includes(t.quadra)) {
+    if (t.valor < 0 && DEST_OBRA_ATIVA.includes(t.destino) && t.quadra && t.quadra !== '-' && E().quadras.includes(t.quadra)) {
       const m = M(d);
       if (t.lote && t.lote !== '-') m.lotes.set(t.quadra + '|' + t.lote, (m.lotes.get(t.quadra + '|' + t.lote) || 0) - t.valor);
       else m.quadras.set(t.quadra, (m.quadras.get(t.quadra) || 0) - t.valor);
@@ -216,7 +218,7 @@ function revRateio(box) {
   const R = rateioAdm(); const ult = R.porMes.filter(x => x.adm > 0).slice(-12).reverse();
   const top = Object.entries(R.porLote).sort((a, b) => b[1] - a[1]).slice(0, 12);
   box.innerHTML = `<div class="card"><h2>Rateio gerencial da administração</h2>
-    <p class="muted small">As despesas da empresa continuam registradas na empresa (é assim que vão para a contabilidade). Para saber quanto cada lote realmente custou, o app distribui essas despesas <b>só entre os lotes que estavam em obra no mês</b>: lotes com custo de obra pago naquele mês. Lotes ainda não iniciados não recebem nada, e lotes com repasse recebido deixam de receber a partir do mês seguinte. Esse rateio é só uma visão: nenhum lançamento é alterado.</p>
+    <p class="muted small">As despesas da empresa continuam registradas na empresa (é assim que vão para a contabilidade). Para saber quanto cada lote realmente custou, o app distribui essas despesas <b>só entre os lotes que estavam em obra no mês</b>: lotes com gasto de construção pago naquele mês (material, mão de obra, pavimentação ou operacional; terreno, ITBI e cartório não contam). Lotes ainda não iniciados não recebem nada, e lotes com repasse recebido deixam de receber a partir do mês seguinte. Esse rateio é só uma visão: nenhum lançamento é alterado.</p>
     <div class="g2"><label>Critério<select id="rtCrit">${opts([['igual', 'Partes iguais entre os lotes ativos no mês'], ['custo', 'Proporcional ao custo de obra do lote no mês']], R.crit)}</select></label><div></div></div>
     <div class="grid kpis">${kpi('Administração paga', brl(R.total), 'todas as datas', 'neg')}${kpi('Rateada entre lotes', brl(R.total - R.semLotes), '', '')}${kpi('Sem lote ativo no mês', brl(R.semLotes), 'fica só na empresa', R.semLotes > 1 ? 'neg' : '')}</div>
     <div class="grid two"><div><div class="lbl">Últimos meses</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Mês</th><th>Administração</th><th>Lotes ativos</th><th>Por lote</th></tr></thead><tbody>${ult.map(x => `<tr><td class="l">${mesNome(x.m)}</td><td class="neg">${brl(x.adm)}</td><td>${x.n}</td><td>${x.n ? brl(x.rateado / x.n) : '<span class="muted">sem lote ativo</span>'}</td></tr>`).join('') || '<tr><td colspan="4" class="l muted">Nenhuma despesa da empresa paga.</td></tr>'}</tbody></table></div></div>
