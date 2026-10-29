@@ -261,18 +261,18 @@ const NAV = [
   ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['cronograma', 'Cronograma'], ['vendas', 'Vendas e repasses'], ['checklist', 'Checklist'], ['simulador', 'Simulador'],
   ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['dados', 'Dados e backup']
 ];
-const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg';
+const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg', LOGO_COMPLETO = 'icons/logo-azul-incorporadora.svg';
 const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Receber'], ['obras', 'Obras'], ['mais', 'Mais']];
 
 /* =========================================================
    Telas de entrada
    ========================================================= */
 function telaNaoConfigurado() {
-  document.body.innerHTML = `<div class="center"><div class="login card"><img src="${LOGO_AZUL}" alt="SFG Incorporadora" class="login-logo"><h1>Sistema ainda não configurado</h1><p class="muted">Falta colar a configuração do Firebase em <code>src/config.js</code> e gerar o app novamente.</p></div></div>`;
+  document.body.innerHTML = `<div class="center"><div class="login card"><img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"><h1>Sistema ainda não configurado</h1><p class="muted">Falta colar a configuração do Firebase em <code>src/config.js</code> e gerar o app novamente.</p></div></div>`;
 }
 function telaLogin(msg) {
   document.body.innerHTML = `<div class="center"><form class="login card" id="fLogin" autocomplete="on">
-    <img src="${LOGO_AZUL}" alt="SFG Incorporadora" class="login-logo"><h1>Financeiro</h1><p class="muted">Acesso restrito</p>
+    <img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"><h1>Financeiro</h1><p class="muted">Acesso restrito</p>
     <label>E-mail<input name="email" type="email" autocomplete="username" required></label>
     <label>Senha<input name="senha" type="password" autocomplete="current-password" required></label>
     <p class="erro" id="loginErr">${esc(msg || '')}</p>
@@ -1357,11 +1357,11 @@ async function gerarPDF(m) {
   const P = s => String(s).replace(/\u2212/g, '-').replace(/[\u202f\u00a0]/g, ' ');
   const pdf = new jsPDF({ unit: 'pt', format: 'a4' }); const W = pdf.internal.pageSize.getWidth();
   const NAVY = [11, 32, 70];
-  pdf.setFillColor(...NAVY); pdf.rect(0, 0, W, 86, 'F');
-  try { const lg = await imgParaPNG(LOGO_BRANCO, 360); pdf.addImage(lg.data, 'PNG', 36, 20, 82, 82 * lg.r); } catch (e) { /* sem logo */ }
-  pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(17); pdf.text('Relatório financeiro', W - 36, 40, { align: 'right' });
+  try { const lg = await imgParaPNG(LOGO_COMPLETO, 480); pdf.addImage(lg.data, 'PNG', 36, 16, 96, 96 * lg.r); } catch (e) { /* sem logo */ }
+  pdf.setDrawColor(...NAVY); pdf.setLineWidth(1.2); pdf.line(36, 92, W - 36, 92);
+  pdf.setTextColor(...NAVY); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(17); pdf.text('Relatório financeiro', W - 36, 40, { align: 'right' });
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11); pdf.text(P(`${mesNome(m)} · ${E().local}`), W - 36, 58, { align: 'right' });
-  pdf.setFontSize(8.5); pdf.text(P('SFG Incorporadora · gerado em ' + new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })), W - 36, 74, { align: 'right' });
+  pdf.setFontSize(8.5); pdf.setTextColor(91, 107, 130); pdf.text(P('SFG Incorporadora · gerado em ' + new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })), W - 36, 74, { align: 'right' });
   let y = 110; pdf.setTextColor(15, 27, 45);
   const titulo = t => { if (y > 740) { pdf.addPage(); y = 50; } pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(...NAVY); pdf.text(t, 36, y); y += 8; };
   const tabela = (head, body, colsNum) => { autoTable(pdf, { startY: y, head: [head], body: body.map(r => r.map(P)), margin: { left: 36, right: 36 }, styles: { fontSize: 8.5, cellPadding: 4, textColor: [15, 27, 45] }, headStyles: { fillColor: NAVY, textColor: 255, fontStyle: 'bold' }, alternateRowStyles: { fillColor: [243, 245, 249] }, columnStyles: Object.fromEntries(colsNum.map(i => [i, { halign: 'right' }])), didParseCell: dd => { if (colsNum.includes(dd.column.index)) dd.cell.styles.halign = 'right'; } }); y = pdf.lastAutoTable.finalY + 22; };

@@ -16,7 +16,7 @@ cpSync('src/icons', OUT + '/icons', { recursive: true });
 cpSync('src/fonts', OUT + '/fonts', { recursive: true });
 writeFileSync(OUT + '/manifest.webmanifest', JSON.stringify({
   name: 'SFG Financeiro', short_name: 'SFG', start_url: './', scope: './', display: 'standalone',
-  background_color: '#0B2046', theme_color: '#0B2046', lang: 'pt-BR',
+  background_color: '#FFFFFF', theme_color: '#0B2046', lang: 'pt-BR',
   icons: [{ src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }, { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }]
 }, null, 1));
 writeFileSync(OUT + '/.nojekyll', '');
