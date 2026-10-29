@@ -1,7 +1,7 @@
 // Service worker: guarda o app no aparelho para abrir sem internet.
 const VERSAO = '__VERSAO__';
 const CACHE = 'sfg-' + VERSAO;
-const ARQUIVOS = ['./', './index.html', './app.js?v=' + VERSAO, './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/logo-branco.svg', './icons/logo-azul.svg', './icons/logo-azul-incorporadora.svg', './fonts/inter-latin-400-normal.woff2', './fonts/inter-latin-500-normal.woff2', './fonts/inter-latin-600-normal.woff2', './fonts/inter-latin-700-normal.woff2'];
+const ARQUIVOS = ['./', './index.html', './app.js?v=' + VERSAO, './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/logo-branco.svg', './icons/logo-azul.svg', './icons/logo-azul-incorporadora.svg', './icons/logo-branco-incorporadora.svg', './fonts/inter-latin-400-normal.woff2', './fonts/inter-latin-500-normal.woff2', './fonts/inter-latin-600-normal.woff2', './fonts/inter-latin-700-normal.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));

@@ -268,11 +268,11 @@ const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Rece
    Telas de entrada
    ========================================================= */
 function telaNaoConfigurado() {
-  document.body.innerHTML = `<div class="center"><div class="login card"><img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"><h1>Sistema ainda não configurado</h1><p class="muted">Falta colar a configuração do Firebase em <code>src/config.js</code> e gerar o app novamente.</p></div></div>`;
+  document.body.innerHTML = `<div class="center"><div class="login card"><picture><source srcset="icons/logo-branco-incorporadora.svg" media="(prefers-color-scheme: dark)"><img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"></picture><h1>Sistema ainda não configurado</h1><p class="muted">Falta colar a configuração do Firebase em <code>src/config.js</code> e gerar o app novamente.</p></div></div>`;
 }
 function telaLogin(msg) {
   document.body.innerHTML = `<div class="center"><form class="login card" id="fLogin" autocomplete="on">
-    <img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"><h1>Financeiro</h1><p class="muted">Acesso restrito</p>
+    <picture><source srcset="icons/logo-branco-incorporadora.svg" media="(prefers-color-scheme: dark)"><img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"></picture><h1>Financeiro</h1><p class="muted">Acesso restrito</p>
     <label>E-mail<input name="email" type="email" autocomplete="username" required></label>
     <label>Senha<input name="senha" type="password" autocomplete="current-password" required></label>
     <p class="erro" id="loginErr">${esc(msg || '')}</p>
@@ -1154,11 +1154,11 @@ VIEWS.cronograma = {
       const entregue = o.etapa === 'Entregue' || (!o.etapa && r.receber < 0.5 && r.receita > 0);
       return { q, n: r.n, o, fin, comp, rep, entregue, alerta: o.fis !== null && fin !== null && fin * 100 - o.fis > 10 };
     });
-    el.innerHTML = `<div class="card"><div class="legend"><span style="--c:var(--navy)">Físico (medição na obra)</span><span style="--c:var(--steel)">Financeiro (gasto ÷ orçado)</span><span style="--c:#1F7A57">Repasse previsto</span></div>
+    el.innerHTML = `<div class="card"><div class="legend"><span style="--c:var(--bal)">Físico (medição na obra)</span><span style="--c:var(--steel)">Financeiro (gasto ÷ orçado)</span><span style="--c:#1F7A57">Repasse previsto</span></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th>Lotes</th><th class="l">Etapa</th><th class="l">Físico × financeiro</th><th>Comprometido</th><th class="l"><div class="gant" style="--n:${meses.length}">${meses.map(m => `<span>${MES3[+m.slice(5, 7) - 1]}</span>`).join('')}</div></th><th></th></tr></thead><tbody>
     ${rows.map(r => `<tr><td class="l"><b>${esc(r.q)}</b></td><td>${r.n}</td>
       <td class="l"><span class="chip ${r.entregue ? 'ok' : ''}">${esc(r.o.etapa || (r.entregue ? 'Entregue' : 'Não informada'))}</span>${r.alerta ? '<br><span class="chip warn" style="margin-top:4px">Gasto à frente da obra</span>' : ''}</td>
-      <td class="l"><div class="dual"><span class="pbar" style="justify-content:flex-start"><span class="bar"><i style="width:${r.o.fis !== null ? r.o.fis : (r.entregue ? 100 : 0)}%;background:var(--navy)"></i></span><span>${r.o.fis !== null ? fPct.format(r.o.fis / 100) : r.entregue ? '100%' : '—'}</span></span>
+      <td class="l"><div class="dual"><span class="pbar" style="justify-content:flex-start"><span class="bar"><i style="width:${r.o.fis !== null ? r.o.fis : (r.entregue ? 100 : 0)}%;background:var(--bal)"></i></span><span>${r.o.fis !== null ? fPct.format(r.o.fis / 100) : r.entregue ? '100%' : '—'}</span></span>
         <span class="pbar" style="justify-content:flex-start"><span class="bar"><i style="width:${Math.min(100, (r.fin || 0) * 100)}%;background:${r.fin > 1 ? 'var(--out)' : 'var(--steel)'}"></i></span><span class="${r.fin > 1 ? 'neg' : ''}">${pct(r.fin)}</span></span></div></td>
       <td class="${r.comp > 1 ? 'neg' : ''}">${pct(r.comp)}</td>
       <td class="l"><div class="gant" style="--n:${meses.length}">${r.rep.map((v, i) => `<span>${v > 0.5 ? `<i class="dia" title="${esc(MES3[+meses[i].slice(5, 7) - 1] + '/' + meses[i].slice(2, 4) + ': ' + brl(v))}"></i>` : ''}</span>`).join('')}</div></td>
