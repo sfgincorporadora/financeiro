@@ -953,7 +953,7 @@ function detalhe(t) {
     <div class="resumo"><b>${esc(t.item)}</b><div class="big ${cls(t.valor)}">${brl2(t.valor)}</div>
       ${pago(t) ? `<span class="chip ok">Pago em ${dBR(t.pag)} · ${esc(t.conta || '')}</span>` : venc ? `<span class="chip bad">Vencida em ${dBR(t.venc)}</span>` : `<span class="chip warn">Vence em ${dBR(t.venc)}</span>`}</div>
     <dl class="dl">
-      <dt>Destino</dt><dd>${esc(t.destino)}${t.aporteTipo ? ' · ' + esc(tipoAporteNome(t.aporteTipo)) : ''}${t.conversao ? ` · convertida em participação em ${dBR(t.conversao)}` : ''}</dd><dt>Pertence a</dt><dd>${ehEmpresa(t) ? 'Empresa (administrativo)' : `${esc(obraT(t))} · quadra ${esc(t.quadra || '-')} · lote ${esc(t.lote || '-')}`}${variasEmpresas() ? ' · ' + esc(empPorId(empT(t))?.nome || '') : ''}</dd>
+      <dt>Destino</dt><dd>${esc(t.destino)}${t.aporteTipo ? ' · ' + esc(tipoAporteNome(t.aporteTipo)) : ''}${t.conversao ? ` · convertida em participação em ${dBR(t.conversao)}` : ''}${t.quitada ? ` · devolvida (não convertida), vencimento ${dBR(t.quitada)}` : ''}</dd><dt>Pertence a</dt><dd>${ehEmpresa(t) ? 'Empresa (administrativo)' : `${esc(obraT(t))} · quadra ${esc(t.quadra || '-')} · lote ${esc(t.lote || '-')}`}${variasEmpresas() ? ' · ' + esc(empPorId(empT(t))?.nome || '') : ''}</dd>
       <dt>Vencimento</dt><dd>${dBR(t.venc)}</dd>${t.juros ? `<dt>Juros / multa</dt><dd class="neg">${brl2(t.juros)}</dd>` : ''}
       ${t.forn ? `<dt>Fornecedor</dt><dd>${esc(t.forn)}</dd>` : ''}<dt>Nota fiscal</dt><dd>${t.nf ? (t.nfNum ? 'Nº ' + esc(t.nfNum) : 'Sim') : 'Não'}</dd>
       ${t.obs ? `<dt>Observação</dt><dd>${esc(t.obs)}</dd>` : ''}${grupo.length > 1 ? `<dt>Grupo</dt><dd>${grupo.length} lançamentos (${grupo.filter(pago).length} pagos)</dd>` : ''}
@@ -964,7 +964,7 @@ function detalhe(t) {
     ${(t.hist || []).length ? `<details class="hist"><summary>Histórico de alterações</summary><ol>${t.hist.slice().reverse().map(h => `<li>${histTxt(h)}</li>`).join('')}</ol><button class="btn link sm" data-act="histT" data-id="${esc(t.id)}">Ver histórico completo</button></details>` : ''}
     <div class="acts wrap">
       ${pago(t) ? `<button class="btn" id="dEst">Estornar baixa</button>` : `<button class="btn primary" id="dBx">${t.valor < 0 ? 'Registrar pagamento' : 'Registrar recebimento'}</button>`}
-      ${!pago(t) && t.valor > 0 ? `<button class="btn" data-act="pix" data-id="${esc(t.id)}">Cobrar por PIX</button>` : ''}${t.aporteTipo === 'conversivel' && t.valor > 0 && !t.conversao ? `<button class="btn" data-act="converter" data-id="${esc(t.id)}">Converter em participação</button>` : ''}<button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
+      ${!pago(t) && t.valor > 0 ? `<button class="btn" data-act="pix" data-id="${esc(t.id)}">Cobrar por PIX</button>` : ''}${t.aporteTipo === 'conversivel' && t.valor > 0 && !t.conversao && !t.quitada ? `<button class="btn" data-act="converter" data-id="${esc(t.id)}">Converter em participação</button><button class="btn" data-act="quitarConv" data-id="${esc(t.id)}">Devolver com juros</button>` : ''}<button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
       ${grupo.filter(x => !pago(x)).length > 1 ? `<button class="btn danger ghost" id="dDelG">Excluir ${grupo.filter(x => !pago(x)).length} em aberto do grupo</button>` : ''}
     </div>`);
   const on = (id, fn) => { const b = f.el.querySelector('#' + id); if (b) b.onclick = fn; };
@@ -2820,8 +2820,8 @@ function balancoDe(L, emp, D) {
     dispon, inter: caixaTeo - dispon,
     recCP: sum(ab.filter(t => t.valor > 0 && t.venc <= lim), t => t.valor), recLP: sum(ab.filter(t => t.valor > 0 && t.venc > lim), t => t.valor),
     pagCP: -sum(ab.filter(t => t.valor < 0 && t.venc <= lim), t => t.valor), pagLP: -sum(ab.filter(t => t.valor < 0 && t.venc > lim), t => t.valor),
-    capital: ini, aportes: sum(realL.filter(ap), v) + sum(ab.filter(ap), t => t.valor), emprest: sum(realL.filter(emprest), v) + sum(ab.filter(emprest), t => t.valor),
-    resReal: sum(realL.filter(t => !ap0(t)), v), resAReal: sum(ab.filter(t => !ap0(t)), t => t.valor)
+    capital: ini, aportes: sum(realL.filter(ap), t => t.valor) + sum(ab.filter(ap), t => t.valor), emprest: sum(realL.filter(emprest), t => t.valor) + sum(ab.filter(emprest), t => t.valor),
+    resReal: sum(realL.filter(t => !ap0(t)), v) + sum(realL.filter(ap0), t => t.juros || 0), resAReal: sum(ab.filter(t => !ap0(t)), t => t.valor)
   };
   o.ativo = o.dispon + Math.max(0, o.inter) + o.recCP + o.recLP; o.passivo = o.pagCP + o.pagLP + Math.max(0, -o.inter) + o.emprest; o.pl = o.capital + o.aportes + o.resReal + o.resAReal;
   return o;

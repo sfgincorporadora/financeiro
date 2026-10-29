@@ -240,3 +240,32 @@ ACOES.converter = d => {
     salvarTitulos(grupo.map(x => ({ ...x, conversao: F.d.value, ...(F.part.value.trim() ? { participacao: F.part.value.trim() } : {}), obs: [x.obs, F.obs.value.trim()].filter(Boolean).join(' · ') })), { acao: 'converteu em participação' });
     f.fechar(); toast('Dívida convertida em participação'); };
 };
+
+/* Dívida conversível que não vira participação: devolve o principal (reduz o passivo)
+   e paga os juros como despesa financeira (entra no resultado). */
+const DEST_JUROS = 'Juros e encargos';
+function garantirDestinoJuros() { if (todosDestinos().includes(DEST_JUROS)) return; const n = clone(E()); n.destinos = { ...n.destinos, nonop: [...(n.destinos.nonop || []), DEST_JUROS] }; salvarEstrutura(n); }
+ACOES.quitarConv = d => {
+  const t = S.byId.get(d.id); if (!t) return;
+  const grupo = t.grupo ? S.list.filter(x => x.grupo === t.grupo && x.aporteTipo === 'conversivel' && x.valor > 0 && !x.conversao && !x.quitada) : [t];
+  const recebidas = grupo.filter(pago); const principal = sum(recebidas.length ? recebidas : grupo, x => x.valor);
+  const f = folha('Devolver dívida conversível', `<form class="form" id="fx"><p>${esc(t.forn || 'Investidor')} · principal ${recebidas.length ? 'recebido' : 'previsto'} <b>${brl2(principal)}</b>${grupo.length > 1 ? ` em ${grupo.length} parcela(s)` : ''}</p>
+    <p class="muted small">O principal volta como <b>devolução</b> (sai do passivo, não é despesa). Os juros entram como despesa financeira no destino "${DEST_JUROS}" e aparecem na DRE.</p>
+    <div class="g2"><label>Data da devolução<input type="date" name="d" value="${hoje()}" required></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), E().contas.find(c => empConta(c.nome) === empT(t))?.nome)}</select></label></div>
+    <div class="g3"><label>Principal (R$)<input name="pr" inputmode="decimal" value="${fNum2.format(principal)}"></label><label>Taxa (% ao mês)<input name="tx" inputmode="decimal" placeholder="Ex.: 1"></label><label>Juros (R$)<input name="ju" inputmode="decimal" placeholder="0,00"></label></div>
+    <p class="hint-data info" id="jHint">Informe a taxa para calcular os juros simples desde cada recebimento, ou digite o valor dos juros direto.</p>
+    <label class="chk"><input type="checkbox" name="pg"> Já foi pago (lança direto no extrato)</label>
+    <div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Lançar devolução</button></div></form>`);
+  const F = f.el.querySelector('#fx');
+  const calc = () => { const tx = parseBR(F.tx.value) / 100; if (!(tx > 0)) return; const ate = new Date(F.d.value); let j = 0;
+    for (const x of (recebidas.length ? recebidas : grupo)) { const ini = new Date(x.pag || x.venc); const meses = Math.max(0, (ate - ini) / (864e5 * 30)); j += x.valor * tx * meses; }
+    F.ju.value = fNum2.format(r2(j)); $('#jHint', F).textContent = `Juros simples de ${F.tx.value}% ao mês desde cada recebimento até ${dBR(F.d.value)}: ${brl2(j)}.`; };
+  F.tx.oninput = calc; F.d.onchange = calc;
+  F.onsubmit = e => { e.preventDefault(); const pr = parseBR(F.pr.value) || 0, ju = parseBR(F.ju.value) || 0; if (!(pr > 0)) { toast('Informe o principal.', 'err'); return; }
+    garantirDestinoJuros(); const g = uid(), venc = F.d.value, pago_ = F.pg.checked;
+    const base = { juros: 0, quadra: '-', lote: '-', local: '', ambito: 'empresa', emp: empT(t), forn: t.forn || '', venc, status: pago_ ? 'pago' : 'aberto', grupo: g, obs: '', criado: Date.now(), ...(pago_ ? { pag: venc, conta: F.conta.value } : {}) };
+    const out = [{ ...base, id: uid(), item: `Devolução dívida conversível${t.forn ? ' - ' + t.forn : ''}`, valor: -r2(pr), destino: 'Aporte', aporteTipo: 'devolucao' }];
+    if (ju > 0) out.push({ ...base, id: uid(), item: `Juros dívida conversível${t.forn ? ' - ' + t.forn : ''}`, valor: -r2(ju), destino: DEST_JUROS });
+    salvarTitulos(out); salvarTitulos(grupo.map(x => ({ ...x, quitada: venc })), { acao: 'devolução sem conversão' });
+    f.fechar(); toast(pago_ ? 'Devolução registrada' : 'Devolução lançada em contas a pagar'); };
+};
