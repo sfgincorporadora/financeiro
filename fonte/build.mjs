@@ -12,6 +12,8 @@ await build({
 writeFileSync(OUT + '/app.js', readFileSync(OUT + '/app.js', 'utf8').replaceAll('__VERSAO__', versao));
 writeFileSync(OUT + '/index.html', readFileSync('src/index.html', 'utf8').replaceAll('__VERSAO__', versao));
 writeFileSync(OUT + '/sw.js', readFileSync('src/sw.js', 'utf8').replaceAll('__VERSAO__', versao));
+await build({ entryPoints: ['src/leitor.js'], bundle: true, format: 'iife', minify: true, target: ['safari15', 'chrome100'], legalComments: 'none', outfile: OUT + '/leitor.js', logLevel: 'warning' });
+cpSync('node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', OUT + '/pdf.worker.min.mjs');
 cpSync('src/icons', OUT + '/icons', { recursive: true });
 cpSync('src/fonts', OUT + '/fonts', { recursive: true });
 writeFileSync(OUT + '/manifest.webmanifest', JSON.stringify({

@@ -171,10 +171,23 @@ function limpar(t) { const o = { ...t }; delete o.mes; return o; }
 function onErroEscrita(e) { console.error(e); toast(e.code === 'permission-denied' ? 'Sem permissão para salvar. Confira o usuário logado.' : 'Erro ao salvar: ' + (e.message || e), 'err'); }
 
 /* Grava vários títulos agrupando por mês (um documento por mês). Não aguarda o servidor: funciona offline. */
-function salvarTitulos(lista) {
+const CAMPOS_HIST = [['item', 'Descrição'], ['valor', 'Valor'], ['venc', 'Vencimento'], ['status', 'Situação'], ['pag', 'Pago em'], ['conta', 'Conta'], ['juros', 'Juros/multa'], ['destino', 'Destino'], ['local', 'Obra'], ['quadra', 'Quadra'], ['lote', 'Lote'], ['emp', 'CNPJ'], ['forn', 'Fornecedor'], ['nfNum', 'NF'], ['obs', 'Observação']];
+function registrarHist(t, ant, opt) {
+  const em = Date.now(), por = S.user?.email || '';
+  if (opt.acao) { t.hist = [...(t.hist || []), { em, por, a: opt.acao }].slice(-25); return; }
+  if (!ant) { t.hist = [{ em, por, a: 'criou' }]; t.criadoPor = por; return; }
+  const m = {};
+  for (const [k] of CAMPOS_HIST) { const a = ant[k] ?? '', b = t[k] ?? ''; if (JSON.stringify(a) !== JSON.stringify(b)) m[k] = [a, b]; }
+  const na = anexosDe(ant).length, nb = anexosDe(t).length; if (na !== nb) m.anexos = [na, nb];
+  if (!Object.keys(m).length) return;
+  const a = ant.status !== t.status ? (t.status === 'pago' ? 'baixa' : 'estorno') : 'alterou';
+  t.hist = [...(ant.hist || []), { em, por, a, m }].slice(-25); t.alteradoPor = por;
+}
+function salvarTitulos(lista, opt = {}) {
   if (somenteLeitura()) { toast('Seu acesso é somente leitura.', 'err'); return; }
   const porMes = {}, apagar = {};
   for (const t of lista) {
+    if (!opt.sistema) registrarHist(t, S.byId.get(t.id), opt);
     t.alterado = Date.now();
     const novo = bucketDe(t);
     const antigo = S.byId.get(t.id)?.mes;
@@ -184,8 +197,15 @@ function salvarTitulos(lista) {
   for (const m in apagar) gravar(doc(db, 'titulos', m), { items: apagar[m] }, { merge: true }).catch(onErroEscrita);
   for (const m in porMes) gravar(doc(db, 'titulos', m), { items: porMes[m] }, { merge: true }).catch(onErroEscrita);
 }
-function excluirTitulos(ids) {
+function excluirTitulos(ids, opt = {}) {
   if (somenteLeitura()) { toast('Seu acesso é somente leitura.', 'err'); return; }
+  if (!opt.semLixeira) {
+    const em = Date.now(), por = S.user?.email || ''; const items = {};
+    for (const id of ids) { const t = S.byId.get(id); if (t) items[id] = JSON.stringify({ t: limpar(t), por, em }); }
+    const atuais = Object.entries((S.lixeira && S.lixeira.items) || {}).map(([k, v]) => { try { return [k, JSON.parse(v).em || 0]; } catch (e) { return [k, 0]; } }).sort((a, b) => b[1] - a[1]);
+    const limite = em - 90 * 864e5; atuais.forEach(([k, e], i) => { if (e < limite || i + Object.keys(items).length >= 1500) items[k] = deleteField(); });
+    if (Object.keys(items).length) gravar(doc(db, 'config', 'lixeira'), { items }, { merge: true }).catch(onErroEscrita);
+  }
   const porMes = {};
   for (const id of ids) { const t = S.byId.get(id); if (!t) continue; (porMes[t.mes] = porMes[t.mes] || {})[id] = deleteField(); }
   for (const m in porMes) gravar(doc(db, 'titulos', m), { items: porMes[m] }, { merge: true }).catch(onErroEscrita);
@@ -215,9 +235,9 @@ function saldos() {
   }
   return { contas, total: sum(contas, c => c.saldo) };
 }
-function projecao() {
-  const h = hoje(), base = saldos().total;
-  const ev = S.list.filter(t => !pago(t)).map(t => ({ d: t.venc && t.venc > h ? t.venc : h, v: t.valor, t }));
+function projecao(lista = S.list, base0) {
+  const h = hoje(), base = base0 === undefined ? saldos().total : base0;
+  const ev = lista.filter(t => !pago(t)).map(t => ({ d: t.venc && t.venc > h ? t.venc : h, v: t.valor, t }));
   ev.sort((a, b) => a.d.localeCompare(b.d) || (b.v - a.v));
   const dias = [{ d: h, v: base }]; let bal = base;
   for (const e of ev) { bal += e.v; e.bal = bal; const last = dias[dias.length - 1]; if (last.d === e.d) last.v = bal; else dias.push({ d: e.d, v: bal }); }
@@ -270,7 +290,7 @@ function iniciarDados() {
     S[key] = snap.exists() ? snap.data() : null; if (key === 'estrutura') S.loaded.estrutura = true; agendarRefresh();
   }, e => console.error(e)));
   cfg('estrutura', 'estrutura'); cfg('orcamento', 'orcamento'); cfg('checklist', 'checklist');
-  cfg('drive', 'drive'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
+  cfg('drive', 'drive'); cfg('agenda', 'agenda'); cfg('lixeira', 'lixeira'); cfg('recorrencias', 'recorrencias'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
   S.unsubs.push(onSnapshot(doc(db, 'config', 'acesso'), s => { S.acesso = s.exists() ? s.data() : null; document.body.classList.toggle('ro', somenteLeitura()); agendarRefresh(); }, e => console.warn(e)));
   S.unsubs.push(onSnapshot(collection(db, 'extratos'), s => { S.extratos = {}; s.forEach(d => S.extratos[d.id] = d.data()); agendarRefresh(); }, e => console.warn(e)));
 }
@@ -286,7 +306,8 @@ function atualizarSync() {
 }
 addEventListener('online', atualizarSync); addEventListener('offline', atualizarSync);
 let _raf = 0;
-function agendarRefresh() { if (_raf) return; _raf = requestAnimationFrame(() => { _raf = 0; refreshView(); }); }
+let _recT = 0;
+function agendarRefresh() { agendarAgenda(); clearTimeout(_recT); _recT = setTimeout(() => gerarRecorrencias(), 1200); if (_raf) return; _raf = requestAnimationFrame(() => { _raf = 0; refreshView(); }); }
 
 /* =========================================================
    Ícones
@@ -318,14 +339,18 @@ const IC = {
   calendario: '<path d="M4 5h16v16H4zM4 9h16M8 3v4M16 3v4"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   voltar: '<path d="M15 6l-6 6 6 6"/>',
+  historico: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 3"/>',
+  recorrentes: '<path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/>',
+  demonstrativos: '<path d="M4 4h16v16H4zM4 9h16M9 9v11M14 13h3M14 16h3"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16 8v8"/>',
   clip: '<path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>'
 };
 const ic = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 
 const NAV = [
-  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['conciliacao', 'Conciliação'], ['relatorios', 'Relatórios'],
+  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['demonstrativos', 'DRE, DFC e Balanço'], ['relatorios', 'Relatório mensal'],
   ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['cronograma', 'Cronograma'], ['vendas', 'Vendas e repasses'], ['checklist', 'Checklist'], ['simulador', 'Simulador'],
-  ['#', 'Gestão'], ['empresas', 'Empresas (CNPJ)'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['dados', 'Dados e backup']
+  ['#', 'Gestão'], ['empresas', 'Empresas (CNPJ)'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['historico', 'Histórico e lixeira'], ['dados', 'Dados e backup']
 ];
 const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg', LOGO_COMPLETO = 'icons/logo-azul-incorporadora.svg';
 const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Receber'], ['obras', 'Obras'], ['mais', 'Mais']];
@@ -464,10 +489,114 @@ const sincEmp = F => {
 };
 const empDoForm = (F, obj) => { if (!F.emp) return; if (F.emp.value) obj.emp = F.emp.value; };
 
+/* ---------- Leitura de boleto e nota fiscal ---------- */
+const BANCOS = { '001': 'Banco do Brasil', '004': 'BNB', '033': 'Santander', '041': 'Banrisul', '070': 'BRB', '077': 'Inter', '104': 'Caixa', '208': 'BTG Pactual', '212': 'Original', '237': 'Bradesco', '260': 'Nubank', '290': 'PagBank', '323': 'Mercado Pago', '336': 'C6', '341': 'Itaú', '389': 'Mercantil', '422': 'Safra', '655': 'Votorantim', '745': 'Citibank', '748': 'Sicredi', '756': 'Sicoob' };
+const soDig = s => String(s || '').replace(/\D/g, '');
+const mod10 = s => { let t = 0, f = 2; for (let i = s.length - 1; i >= 0; i--) { let v = +s[i] * f; if (v > 9) v = Math.floor(v / 10) + (v % 10); t += v; f = f === 2 ? 1 : 2; } return (10 - (t % 10)) % 10; };
+const mod11Bol = s => { let t = 0, f = 2; for (let i = s.length - 1; i >= 0; i--) { t += +s[i] * f; f = f === 9 ? 2 : f + 1; } const r = 11 - (t % 11); return r === 0 || r === 10 || r === 11 ? 1 : r; };
+const mod11NFe = s => { let t = 0, f = 2; for (let i = s.length - 1; i >= 0; i--) { t += +s[i] * f; f = f === 9 ? 2 : f + 1; } const r = t % 11; return r < 2 ? 0 : 11 - r; };
+function vencFator(fator) {
+  if (!fator) return '';
+  const h = hoje(); const c = [addDays('1997-10-07', fator), addDays('1997-10-07', fator + 9000)];
+  const dist = d => Math.abs(new Date(d) - new Date(h)); return c.sort((a, b) => dist(a) - dist(b))[0];
+}
+function lerChaveNFe(ch) {
+  const d = soDig(ch); if (d.length !== 44 || mod11NFe(d.slice(0, 43)) !== +d[43] || !['55', '65', '57'].includes(d.slice(20, 22))) return null;
+  return { tipo: 'nfe', chave: d, fornCnpj: d.slice(6, 20), nNF: String(+d.slice(25, 34)), serie: String(+d.slice(22, 25)), emissao: '20' + d.slice(2, 4) + '-' + d.slice(4, 6) };
+}
+/* Linha digitável ou código de barras de boleto bancário ou de arrecadação (contas de consumo, tributos). */
+function lerCodigoBoleto(txt) {
+  const d = soDig(txt);
+  const nfe = lerChaveNFe(d); if (nfe) return nfe;
+  let cb = '';
+  if (d.length === 47) cb = d.slice(0, 4) + d[32] + d.slice(33, 47) + d.slice(4, 9) + d.slice(10, 20) + d.slice(21, 31);
+  else if (d.length === 48 && d[0] === '8') cb = d.slice(0, 11) + d.slice(12, 23) + d.slice(24, 35) + d.slice(36, 47);
+  else if (d.length === 44) cb = d;
+  else return null;
+  if (cb[0] === '8') {
+    const idv = cb[2]; const valor = ['6', '7'].includes(idv) ? +cb.slice(4, 15) / 100 : 0;
+    const dv = ['6', '7'].includes(idv) ? mod10(cb.slice(0, 3) + cb.slice(4)) : mod11NFe(cb.slice(0, 3) + cb.slice(4));
+    return { tipo: 'arrecadacao', codigo: cb, valor, valido: +cb[3] === dv || ['8', '9'].includes(idv) };
+  }
+  if (cb.length !== 44) return null;
+  const valido = mod11Bol(cb.slice(0, 4) + cb.slice(5)) === +cb[4];
+  return { tipo: 'boleto', codigo: cb, banco: BANCOS[cb.slice(0, 3)] || 'banco ' + cb.slice(0, 3), venc: vencFator(+cb.slice(5, 9)), valor: +cb.slice(9, 19) / 100, valido };
+}
+const numBR = s => +String(s).replace(/\./g, '').replace(',', '.');
+const dataBRiso = s => { const m = String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; };
+function lerXmlNFe(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const q = (sel, el = doc) => { const x = el.getElementsByTagName(sel)[0]; return x ? x.textContent.trim() : ''; };
+  const inf = doc.getElementsByTagName('infNFe')[0]; if (!inf) return null;
+  const emit = doc.getElementsByTagName('emit')[0], dest = doc.getElementsByTagName('dest')[0];
+  const dups = [...doc.getElementsByTagName('dup')].map(d => ({ d: q('dVenc', d), v: +q('vDup', d) })).filter(x => x.d && x.v > 0);
+  const det = [...doc.getElementsByTagName('det')].map(d => ({ prod: q('xProd', d), qtd: +q('qCom', d), unid: q('uCom', d).toLowerCase() }));
+  const nome = emit ? (q('xFant', emit) || q('xNome', emit)) : '';
+  return { tipo: 'nfe', chave: (inf.getAttribute('Id') || '').replace(/^NFe/, ''), nNF: q('nNF'), emissao: q('dhEmi').slice(0, 10) || q('dEmi'), forn: nome, fornCnpj: emit ? q('CNPJ', emit) || q('CPF', emit) : '', destCnpj: dest ? q('CNPJ', dest) || q('CPF', dest) : '', valor: +q('vNF') || 0, dups, det };
+}
+function lerTextoDocumento(tx) {
+  const r = {}; const T = tx.replace(/ /g, ' ');
+  const lin = T.match(/\d{5}[.\s]?\d{5}\s*\d{5}[.\s]?\d{6}\s*\d{5}[.\s]?\d{6}\s*\d\s*\d{14}/) || T.match(/8\d{10}[\s-]?\d\s*\d{11}[\s-]?\d\s*\d{11}[\s-]?\d\s*\d{11}[\s-]?\d/);
+  if (lin) Object.assign(r, lerCodigoBoleto(lin[0]) || {});
+  const ch = T.match(/(?:\d{4}\s?){11}/g); if (ch) for (const c of ch) { const n = lerChaveNFe(c); if (n) { r.nfe = n; break; } }
+  const vt = T.match(/VALOR\s+TOTAL\s+DA\s+NOTA[^\d]{0,60}([\d.]+,\d{2})/i) || T.match(/VALOR\s+(?:L[IÍ]QUIDO|TOTAL)(?:\s+D[AO]S?\s+(?:NOTA|NFS-?E|SERVI[CÇ]OS?))?[^\d]{0,40}([\d.]+,\d{2})/i);
+  if (vt) r.valorNota = numBR(vt[1]);
+  const nn = T.match(/N[UÚ]MERO\s+DA\s+NFS-?E[^\d]{0,20}(\d{1,10})/i) || T.match(/NFS-?e\s*N[º°o.]*\s*:?\s*(\d{1,10})/i); if (nn) r.nNF = String(+nn[1]);
+  const rec = T.match(/RECEBEMOS\s+DE\s+(.+?)\s+OS\s+PRODUTOS/i); if (rec) r.forn = rec[1].trim();
+  const ben = T.match(/Benefici[aá]rio\s*:?\s*\n?\s*([^\n]{3,90})/i); if (ben && !/CPF|CNPJ|Ag[eê]ncia/i.test(ben[1].slice(0, 6))) r.benef = ben[1].replace(/\s*(CNPJ|CPF).*$/i, '').trim();
+  r.cnpjs = [...new Set((T.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g) || []).map(soDig).filter(x => x.length === 14))];
+  const dups = [...T.matchAll(/\b(\d{3})\s+(\d{2}\/\d{2}\/\d{4})\s+(?:R\$\s*)?([\d.]+,\d{2})/g)].map(m => ({ d: dataBRiso(m[2]), v: numBR(m[3]) }));
+  if (dups.length) r.dups = dups;
+  if (!r.venc) { const vv = T.match(/Vencimento\s*:?\s*\n?\s*(\d{2}\/\d{2}\/\d{4})/i); if (vv) r.vencTexto = dataBRiso(vv[1]); }
+  return r;
+}
+const tituloCase = s => String(s || '').toLowerCase().replace(/(^|\s|\/|-)(\p{L})/gu, (m, a, b) => a + b.toUpperCase()).replace(/\b(Ltda|Me|Epp|Eireli|S\/a|Sa)\b/gi, x => x.toUpperCase());
+function fornPorCnpj(c) { const d = soDig(c); if (!d) return ''; const l = (S.fornecedores && S.fornecedores.lista) || {}; for (const n in l) if (soDig(l[n].cnpj) === d) return n; return ''; }
+/* Junta o que foi encontrado em um resumo único. */
+function dadosLidos(partes) {
+  const o = {}; const p = Object.assign({}, ...partes.filter(Boolean));
+  const nfe = p.tipo === 'nfe' ? p : p.nfe;
+  o.valor = p.dups && p.dups.length > 1 ? sum(p.dups, x => x.v) : (p.tipo === 'nfe' && p.valor) || p.valorNota || p.valor || 0;
+  if (p.tipo === 'boleto' || p.tipo === 'arrecadacao') { o.valor = p.valor || o.valor; o.venc = p.venc || p.vencTexto || ''; o.boleto = p; }
+  if (p.dups && p.dups.length) { o.dups = p.dups; if (p.dups.length === 1) o.venc = o.venc || p.dups[0].d; }
+  if (!o.venc && p.vencTexto) o.venc = p.vencTexto;
+  if (nfe) { o.nNF = nfe.nNF; o.fornCnpj = nfe.fornCnpj; o.chave = nfe.chave; }
+  if (p.nNF && !o.nNF) o.nNF = p.nNF;
+  const empCnpjs = E().empresas.map(x => soDig(x.cnpj)).filter(Boolean);
+  const dest = p.destCnpj || (p.cnpjs || []).find(c => empCnpjs.includes(c));
+  if (dest) { const e = E().empresas.find(x => soDig(x.cnpj) === soDig(dest)); if (e) o.emp = e.id; o.destCnpj = dest; }
+  if (!o.fornCnpj && p.fornCnpj) o.fornCnpj = p.fornCnpj;
+  if (!o.fornCnpj && p.cnpjs) o.fornCnpj = p.cnpjs.find(c => !empCnpjs.includes(c)) || '';
+  o.forn = fornPorCnpj(o.fornCnpj) || (p.forn ? tituloCase(p.forn) : '') || (p.benef ? tituloCase(p.benef) : '');
+  if (p.det && p.det.length === 1 && p.det[0].qtd > 0) { o.qtd = p.det[0].qtd; o.unid = p.det[0].unid; o.prod = p.det[0].prod; }
+  o.ehNota = !!(nfe || p.nNF || p.valorNota);
+  return o;
+}
+async function carregarLeitor() {
+  if (window.SFGLeitor) return window.SFGLeitor;
+  if (!navigator.onLine) throw new Error('A leitura de PDF e foto precisa de internet na primeira vez.');
+  await new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'leitor.js?v=__VERSAO__'; s.onload = res; s.onerror = () => rej(new Error('Não consegui carregar o leitor.')); document.head.appendChild(s); });
+  return window.SFGLeitor;
+}
+async function lerArquivoDocumento(file) {
+  const nome = (file.name || '').toLowerCase();
+  if (nome.endsWith('.xml') || file.type.includes('xml')) { const x = lerXmlNFe(await file.text()); if (!x) throw new Error('Esse XML não parece ser de uma NF-e.'); return x; }
+  const L = await carregarLeitor();
+  if (file.type === 'application/pdf' || nome.endsWith('.pdf')) { const tx = await L.textoPDF(await file.arrayBuffer()); if (!tx.trim()) throw new Error('O PDF não tem texto (parece uma imagem escaneada). Tente uma foto mais nítida do código de barras.'); return lerTextoDocumento(tx); }
+  const cod = await L.codigoImagem(file); if (!cod) throw new Error('Não encontrei código de barras ou QR code na foto. Tente aproximar e deixar o código reto e bem iluminado.');
+  const ch = (cod.match(/\d{44}/) || [])[0]; return lerCodigoBoleto(ch && lerChaveNFe(ch) ? ch : cod) || (ch ? lerChaveNFe(ch) : null) || {};
+}
+
 /* ---------- Novo lançamento ---------- */
 function formNovo(def = {}) {
   const h = hoje();
   const f = folha('Novo lançamento', `<form id="fNovo" class="form">
+    <details class="leitor"><summary>${ic('scan', 16)} Ler boleto ou nota fiscal</summary>
+      <p class="muted small">Cole a linha digitável do boleto ou a chave da nota, ou escolha o PDF do boleto, o PDF ou o XML da nota, ou uma foto do código de barras. O app preenche o que encontrar e guarda o arquivo como anexo.</p>
+      <textarea name="codigo" rows="2" placeholder="Linha digitável, código de barras ou chave de 44 dígitos"></textarea>
+      <div class="leitor-acts"><label class="btn sm file">Escolher arquivo ou foto<input type="file" id="lerArq" accept="application/pdf,.xml,text/xml,image/*" multiple hidden></label><button type="button" class="btn sm primary" id="lerOk">Ler</button></div>
+      <div id="lerRes" class="lerres"></div></details>
+    <input type="hidden" name="fornCnpj">
     <div class="seg full" id="segTipo"><button type="button" data-v="saida" class="${def.tipo !== 'entrada' ? 'on' : ''}">Saída (pagar)</button><button type="button" data-v="entrada" class="${def.tipo === 'entrada' ? 'on' : ''}">Entrada (receber)</button></div>
     <label class="chk"><input type="checkbox" name="realizado" ${def.realizado ? 'checked' : ''}> Já foi pago/recebido (lança direto no extrato)</label>
     <label>Descrição<input name="item" required placeholder="Ex.: Mendonça NF, Parcela terreno, Venda" list="dlItens" value="${esc(def.item || '')}"></label>
@@ -479,7 +608,9 @@ function formNovo(def = {}) {
     <div class="g2"><label>Quadra<select name="quadra">${opts(quadrasOpts(), def.quadra || '-')}</select></label>
       <label>Vencimento${'<input type="date" name="venc" required value="' + (def.venc || h) + '">'}</label></div>
     <div id="boxLotes"></div>
-    <div class="g2"><label>Parcelas<input name="parcelas" type="number" min="1" max="240" value="1" inputmode="numeric"></label>
+    <label class="chk"><input type="checkbox" name="recorrente" ${def.recorrente ? 'checked' : ''}> Conta recorrente, sem data final (contador, aluguel, internet…)</label>
+    <div id="boxRec" class="g2 hidden"><label>Repete<select name="freq">${opts(FREQ, '1')}</select></label><label>Termina em <span class="muted">(opcional)</span><input type="date" name="fimRec"></label></div>
+    <div class="g2" id="rowParc"><label>Parcelas<input name="parcelas" type="number" min="1" max="240" value="1" inputmode="numeric"></label>
       <label>Intervalo<select name="intervalo"><option value="1">Mensal</option><option value="0.5">Quinzenal</option><option value="7d">Semanal</option></select></label></div>
     <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Vencimento em fim de semana ou feriado vai para o próximo dia útil</label>
     <div id="boxParc"></div>
@@ -487,7 +618,7 @@ function formNovo(def = {}) {
     <div class="g2"><label>Quantidade <span class="muted">(opcional, para histórico de preço)</span><input name="qtd" inputmode="decimal" placeholder="Ex.: 200"></label><label>Unidade<input name="unid" list="dlUnid" placeholder="sc, m³, un, kg"></label></div><datalist id="dlUnid"><option value="sc"><option value="m³"><option value="m²"><option value="un"><option value="kg"><option value="t"><option value="milheiro"><option value="m"></datalist>
     <div class="g2"><label class="chk"><input type="checkbox" name="nf"> Tem nota fiscal</label><label>Número da NF<input name="nfNum" inputmode="numeric" placeholder="opcional"></label></div>
     <label>Observação<textarea name="obs" rows="2"></textarea></label>
-    <label>Anexo (foto do boleto ou da nota)<input type="file" name="anexo" accept="image/*,application/pdf"></label>
+    <div id="boxAnexos" class="anx"></div>
     <div class="preview" id="prevNovo"></div>
     <div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary" type="submit">Salvar</button></div>
     <datalist id="dlItens">${[...new Set(S.list.slice(-3000).map(t => t.item.replace(/\s*[-–]\s*[A-Z]\d?\s*[\d.]*\s*$/, '').replace(/\s*\(\d+\/\d+\)\s*/, ' ').trim()))].slice(0, 300).map(x => `<option value="${esc(x)}">`).join('')}</datalist>
@@ -544,7 +675,7 @@ function formNovo(def = {}) {
         let item = base + (n > 1 ? ` (${i + 1}/${n})` : '') + (l !== '-' ? ` - ${q} ${l}` : (q !== '-' ? ` - ${q}` : ''));
         const valor = (tipo === 'saida' ? -1 : 1) * valores[k++];
         if (!valor) continue;
-        const t = { id: uid(), item, valor, juros: 0, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
+        const t = { id: uid(), item, valor, juros: 0, ...(F.fornCnpj.value ? { fornCnpj: F.fornCnpj.value } : {}), nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
         if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
         if (venc !== parc[i].d) t.vencOrig = parc[i].d;
         empDoForm(F, t);
@@ -555,9 +686,15 @@ function formNovo(def = {}) {
     }
     return { lista: out, total: out.length, ajustes };
   };
+  const ehRec = () => F.recorrente.checked;
+  const modoRec = () => {
+    const r = ehRec(); $('#boxRec', F).classList.toggle('hidden', !r); $('#rowParc', F).classList.toggle('hidden', r); $('#boxParc', F).classList.toggle('hidden', r);
+    if (r) { F.realizado.checked = false; F.parcelas.value = 1; recalcParc(); real(); } F.realizado.closest('label').classList.toggle('hidden', r);
+  };
   const prev = () => {
     const g = gerar(); const p = $('#prevNovo', F);
     if (!F.item.value.trim()) { p.innerHTML = ''; return; }
+    if (ehRec()) { const v = parseBR(F.valor.value); const fr = FREQ.find(x => x[0] === F.freq.value)[1].toLowerCase(); p.innerHTML = v > 0 ? `<b>Conta recorrente ${fr}</b> de <b class="${tipo === 'saida' ? 'neg' : 'pos'}">${brl2(v)}</b>, primeiro vencimento ${dCurtoSem(F.util.checked ? proximoDiaUtil(F.venc.value) : F.venc.value)}${F.fimRec.value ? ', até ' + dBR(F.fimRec.value) : ', sem data final'}.<br><span class="muted">O app mantém os próximos ${HORIZ_REC} meses lançados em Contas a ${tipo === 'saida' ? 'pagar' : 'receber'} e cria os seguintes sozinho. Gerencie em Contas recorrentes.</span>` : ''; return; }
     if (g.erro) { p.innerHTML = `<span class="muted">${g.total} lançamento(s)</span>`; return; }
     const tot = sum(g.lista, t => t.valor);
     if (!g.lista.length) { p.innerHTML = '<span class="muted">Informe valores maiores que zero.</span>'; return; }
@@ -567,14 +704,68 @@ function formNovo(def = {}) {
   if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; lotesBox(); recalcParc(); prev(); } sincEmp(F); };
   if (F.emp) { F.emp.onchange = () => sincEmp(F); sincEmp(F); }
   F.realizado.onchange = () => { real(); prev(); };
+  F.recorrente.onchange = () => { modoRec(); prev(); }; modoRec();
   F.addEventListener('input', prev); F.addEventListener('change', prev);
   lotesBox(); real(); recalcParc(); prev();
+  const anx = caixaAnexos($('#boxAnexos', F), () => F.realizado.checked ? 'comprovante' : 'nota');
+  const aplicarLido = (o, arquivos) => {
+    const feito = [];
+    const tipoAtual = () => $('#segTipo .on', F)?.dataset.v;
+    if (tipoAtual() !== 'saida') $('#segTipo [data-v=saida]', F).click();
+    if (o.forn) { F.forn.value = o.forn; feito.push('fornecedor'); }
+    if (o.fornCnpj) F.fornCnpj.value = o.fornCnpj;
+    if (o.nNF) { F.nfNum.value = o.nNF; F.nf.checked = true; feito.push('NF ' + o.nNF); } else if (o.ehNota) F.nf.checked = true;
+    if (!F.item.value.trim()) F.item.value = (o.forn || (o.boleto && o.boleto.banco ? 'Boleto ' + o.boleto.banco : 'Conta')) + (o.nNF ? ' NF ' + o.nNF : '');
+    if (o.emp && F.emp) { F.emp.value = o.emp; sincEmp(F); feito.push('CNPJ da nota'); }
+    if (o.qtd) { F.qtd.value = String(o.qtd).replace('.', ','); F.unid.value = o.unid || ''; feito.push('quantidade'); }
+    F.modo.value = 'total';
+    if (o.dups && o.dups.length > 1) {
+      F.valor.value = fNum2.format(o.valor); F.parcelas.value = o.dups.length; F.venc.value = o.dups[0].d; recalcParc();
+      o.dups.forEach((x, i) => { if (parc[i]) { parc[i].d = x.d; parc[i].dEdit = true; parc[i].v = x.v; parc[i].vEdit = true; } }); renderParc();
+      feito.push(`${o.dups.length} parcelas com datas e valores da nota`);
+    } else {
+      if (o.valor) { F.valor.value = fNum2.format(o.valor); feito.push('valor'); }
+      if (o.venc) { F.venc.value = o.venc; feito.push('vencimento'); }
+      recalcParc();
+    }
+    for (const a of arquivos || []) anx.adicionar(a, /xml/i.test(a.type + a.name) ? 'nota' : o.boleto ? 'boleto' : 'nota');
+    if (arquivos && arquivos.length) feito.push('anexo');
+    prev();
+    return feito;
+  };
+  const lerRes = $('#lerRes', F);
+  const mostrarLido = (o, feito) => {
+    const avisos = [];
+    if (o.boleto && o.boleto.valido === false) avisos.push('O dígito verificador do código não confere. Confira se foi digitado certo.');
+    if (o.boleto && o.boleto.tipo === 'arrecadacao' && !o.venc) avisos.push('Contas de consumo e tributos não trazem o vencimento no código: informe a data.');
+    if (o.chave && !o.valor) avisos.push('A chave da nota não traz o valor: informe o valor ou leia o PDF/XML da nota.');
+    if (o.destCnpj && !o.emp && variasEmpresas()) avisos.push('A nota foi emitida para o CNPJ ' + fCnpj(o.destCnpj) + ', que não está cadastrado em Empresas.');
+    lerRes.innerHTML = feito.length ? `<p class="ok small">Preenchido: ${esc(feito.join(', '))}. Confira antes de salvar.</p>${avisos.map(a => `<p class="hint-data">${esc(a)}</p>`).join('')}` : `<p class="hint-data">Não encontrei dados para preencher.</p>`;
+  };
+  $('#lerOk', F).onclick = () => { const c = F.codigo.value.trim(); if (!c) return; const r = lerCodigoBoleto(c); if (!r) { lerRes.innerHTML = '<p class="hint-data">Não reconheci esse número. A linha digitável tem 47 ou 48 dígitos; a chave da nota tem 44.</p>'; return; } const o = dadosLidos([r]); mostrarLido(o, aplicarLido(o)); };
+  $('#lerArq', F).onchange = async ev => {
+    const arqs = [...ev.target.files]; if (!arqs.length) return; lerRes.innerHTML = '<p class="muted small">Lendo…</p>';
+    const partes = [], erros = [];
+    for (const a of arqs) { try { partes.push(await lerArquivoDocumento(a)); } catch (e) { erros.push(e.message); } }
+    if (F.codigo.value.trim()) partes.push(lerCodigoBoleto(F.codigo.value.trim()));
+    const o = dadosLidos(partes); const feito = partes.filter(Boolean).length ? aplicarLido(o, arqs) : [];
+    mostrarLido(o, feito); if (erros.length) lerRes.innerHTML += erros.map(e => `<p class="hint-data">${esc(e)}</p>`).join('');
+    ev.target.value = '';
+  };
   F.onsubmit = async e => {
-    e.preventDefault(); if (F.emp && !F.emp.value) { toast('Escolha o CNPJ do lançamento.', 'err'); F.emp.focus(); return; } const g = gerar(); if (g.erro) { toast(g.erro, 'err'); return; } if (!g.lista.length) { toast('Informe valores maiores que zero.', 'err'); return; }
+    e.preventDefault(); if (F.emp && !F.emp.value) { toast('Escolha o CNPJ do lançamento.', 'err'); F.emp.focus(); return; }
+    if (ehRec()) {
+      const v = parseBR(F.valor.value); if (!(v > 0)) { toast('Informe um valor maior que zero.', 'err'); return; }
+      if ($$('[name=lotes]:checked', F).length) { toast('Conta recorrente não divide por lotes. Desmarque os lotes.', 'err'); return; }
+      if (F.fimRec.value && F.fimRec.value < F.venc.value) { toast('A data final é anterior ao primeiro vencimento.', 'err'); return; }
+      const r = { id: uid(), item: F.item.value.trim(), valor: (tipo === 'saida' ? -1 : 1) * r2(v), destino: F.destino.value, forn: F.forn.value.trim(), local: obraDoForm(F), quadra: F.quadra.value, emp: F.emp ? F.emp.value : '', obs: F.obs.value.trim(), inicio: F.venc.value, passo: +F.freq.value, fim: F.fimRec.value || '', util: F.util.checked, ativo: true, criado: Date.now(), por: S.user?.email || '' };
+      salvarRec(r); f.fechar(); gerarRecorrencias(); toast('Conta recorrente criada'); return;
+    }
+    const g = gerar(); if (g.erro) { toast(g.erro, 'err'); return; } if (!g.lista.length) { toast('Informe valores maiores que zero.', 'err'); return; }
     if (g.total > 60 && !(await confirmar(`Isso vai criar <b>${g.total}</b> lançamentos. Continuar?`, 'Criar', false))) return;
-    const arq = F.anexo.files[0];
-    if (arq) { try { const aid = await salvarAnexo(arq); g.lista.forEach(t => t.anexo = aid); } catch (err) { toast(err.message, 'err'); return; } }
+    if (anx.itens.length) { try { const lst = await anx.salvar(); g.lista.forEach(t => t.anexos = lst.map(x => ({ ...x }))); } catch (err) { toast(err.message, 'err'); return; } }
     salvarTitulos(g.lista); f.fechar(); toast(g.total > 1 ? `${g.total} lançamentos criados` : 'Lançamento salvo');
+    const fc = F.fornCnpj.value, fn = F.forn.value.trim(); if (fc && fn && !fornPorCnpj(fc) && !((S.fornecedores && S.fornecedores.lista) || {})[fn]) salvarForn(fn, { cnpj: fCnpj(fc), cat: F.destino.value });
   };
 }
 
@@ -622,15 +813,17 @@ function formBaixa(ids) {
     <div class="resumo">${um ? `<b>${esc(t0.item)}</b><br><span class="muted">Vencimento ${dBR(t0.venc)}</span>` : `<b>${ts.length} lançamentos</b>`}<div class="big ${cls(tot)}">${brl2(tot)}</div></div>
     <div class="g2"><label>Data do ${ent ? 'recebimento' : 'pagamento'}<input type="date" name="pag" required value="${hoje()}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome))}</select></label></div>
     ${um ? `<div class="g2"><label>Valor ${ent ? 'recebido' : 'pago'} (sem juros)<input name="valor" inputmode="decimal" value="${fNum2.format(Math.abs(t0.valor))}"></label><label>Juros / multa (R$)<input name="juros" inputmode="decimal" placeholder="0,00"></label></div>` : `<label>Juros / multa total (R$) <span class="muted">— rateado proporcionalmente</span><input name="juros" inputmode="decimal" placeholder="0,00"></label>`}
+    <label>Comprovante <span class="muted">(opcional, foto ou PDF)</span><input type="file" name="comp" accept="image/*,application/pdf"></label>
     <div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary" type="submit">Confirmar baixa</button></div></form>`);
   const F = f.el.querySelector('#fBx');
-  F.onsubmit = e => {
+  F.onsubmit = async e => {
     e.preventDefault(); const j = parseBR(F.juros.value) || 0;
+    let comp = null; if (F.comp.files[0]) { try { comp = await salvarAnexo(F.comp.files[0]); } catch (err) { toast(err.message, 'err'); return; } }
     const out = ts.map(t => {
       const sg = t.valor < 0 ? -1 : 1; const n = { ...t, status: 'pago', pag: F.pag.value, conta: F.conta.value };
       if (um) { const v = parseBR(F.valor.value); if (v >= 0) n.valor = sg * v; n.juros = j > 0 ? sg * j : 0; }
       else n.juros = j > 0 ? sg * r2(j * Math.abs(t.valor) / Math.abs(tot || 1)) : 0;
-      return n;
+      return comp ? comAnexos(n, [...anexosDe(n), { id: comp, tipo: 'comprovante' }]) : n;
     });
     salvarTitulos(out); f.fechar(); listaSel.clear(); toast(um ? 'Baixa registrada' : `${out.length} baixas registradas`); refreshView();
   };
@@ -649,7 +842,10 @@ function detalhe(t) {
       ${t.forn ? `<dt>Fornecedor</dt><dd>${esc(t.forn)}</dd>` : ''}<dt>Nota fiscal</dt><dd>${t.nf ? (t.nfNum ? 'Nº ' + esc(t.nfNum) : 'Sim') : 'Não'}</dd>
       ${t.obs ? `<dt>Observação</dt><dd>${esc(t.obs)}</dd>` : ''}${grupo.length > 1 ? `<dt>Grupo</dt><dd>${grupo.length} lançamentos (${grupo.filter(pago).length} pagos)</dd>` : ''}
     </dl>
-    <div id="anexoBox">${t.anexo ? `<button class="btn" id="verAnexo">${ic('clip', 16)} ${t.anexoLink ? 'Abrir anexo no Drive' : 'Ver anexo'}</button>${t.anexoLink ? '' : ' <span class="muted small">aguardando envio ao Drive</span>'}` : `<label class="btn file">${ic('clip', 16)} Anexar foto ou PDF<input type="file" id="addAnexo" accept="image/*,application/pdf" hidden></label>`}</div>
+    <div id="anexoBox" class="anx"><div class="lbl">Anexos</div>
+      <div class="anx-lista">${anexosDe(t).map((a, i) => `<div class="anx-row"><button type="button" class="btn sm" data-vax="${i}">${ic('clip', 14)} ${esc(tipoAnexoNome(a.tipo))}</button><span class="muted small">${a.link ? 'no Google Drive' : 'aguardando envio ao Drive'}</span><button type="button" class="x rw" data-rax="${i}" aria-label="Remover anexo">×</button></div>`).join('') || '<p class="muted small">Nenhum anexo.</p>'}</div>
+      <div class="anx-add rw"><select id="tipoAx" aria-label="Tipo do anexo">${opts(TIPOS_ANEXO, pago(t) ? 'comprovante' : 'nota')}</select><label class="btn sm file">${ic('clip', 14)} Adicionar foto ou PDF<input type="file" id="addAnexo" accept="image/*,application/pdf" hidden></label></div></div>
+    ${(t.hist || []).length ? `<details class="hist"><summary>Histórico de alterações (${t.hist.length})</summary><ol>${t.hist.slice().reverse().map(h => `<li>${histTxt(h)}</li>`).join('')}</ol></details>` : ''}
     <div class="acts wrap">
       ${pago(t) ? `<button class="btn" id="dEst">Estornar baixa</button>` : `<button class="btn primary" id="dBx">${t.valor < 0 ? 'Registrar pagamento' : 'Registrar recebimento'}</button>`}
       <button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
@@ -662,12 +858,32 @@ function detalhe(t) {
   on('dDup', () => { f.fechar(); formNovo({ tipo: t.valor < 0 ? 'saida' : 'entrada', item: t.item.replace(/\s*-\s*\S+\s+\S+$/, ''), forn: t.forn, destino: t.destino, valor: t.valor, quadra: t.quadra, lote: t.lote, venc: addMonths(t.venc, 1) }); });
   on('dDel', async () => { if (await confirmar(`Excluir <b>${esc(t.item)}</b>?`, 'Excluir')) { excluirTitulos([t.id]); f.fechar(); toast('Lançamento excluído'); } });
   on('dDelG', async () => { const ab = grupo.filter(x => !pago(x)); if (await confirmar(`Excluir os <b>${ab.length}</b> lançamentos em aberto deste grupo? Os já pagos ficam.`, 'Excluir')) { excluirTitulos(ab.map(x => x.id)); f.fechar(); toast(ab.length + ' lançamentos excluídos'); } });
-  on('verAnexo', () => verAnexo(t.anexo, t.anexoLink));
+  $$('[data-vax]', f.el).forEach(b => b.onclick = () => { const a = anexosDe(t)[+b.dataset.vax]; verAnexo(a.id, a.link); });
+  $$('[data-rax]', f.el).forEach(b => b.onclick = async () => { const ax = anexosDe(t), a = ax[+b.dataset.rax]; if (await confirmar(`Tirar o anexo <b>${esc(tipoAnexoNome(a.tipo))}</b> deste lançamento? ${a.link ? 'O arquivo continua no seu Google Drive.' : ''}`, 'Remover')) { salvarTitulos([comAnexos(t, ax.filter((_, i) => i !== +b.dataset.rax))]); f.fechar(); toast('Anexo removido'); } });
   const inp = f.el.querySelector('#addAnexo');
-  if (inp) inp.onchange = async () => { try { const aid = await salvarAnexo(inp.files[0]); salvarTitulos([{ ...t, anexo: aid }]); f.fechar(); toast('Anexo salvo'); } catch (e) { toast(e.message, 'err'); } };
+  if (inp) inp.onchange = async () => { try { const aid = await salvarAnexo(inp.files[0]); salvarTitulos([comAnexos(t, [...anexosDe(t), { id: aid, tipo: f.el.querySelector('#tipoAx').value }])]); f.fechar(); toast('Anexo salvo'); } catch (e) { toast(e.message, 'err'); } };
 }
 
 /* ---------- Anexos ---------- */
+const TIPOS_ANEXO = [['nota', 'Nota fiscal'], ['boleto', 'Boleto'], ['comprovante', 'Comprovante'], ['contrato', 'Contrato'], ['outro', 'Outro']];
+const tipoAnexoNome = k => (TIPOS_ANEXO.find(x => x[0] === k) || ['', 'Anexo'])[1];
+const anexosDe = t => Array.isArray(t.anexos) ? t.anexos : (t.anexo || t.anexoLink ? [{ id: t.anexo || '', tipo: '', link: t.anexoLink || '', drive: t.anexoDrive || '' }] : []);
+const comAnexos = (t, lista) => { const n = { ...t, anexos: lista }; delete n.anexo; delete n.anexoLink; delete n.anexoDrive; return n; };
+const tipoPorNome = (nome, padrao) => /boleto/i.test(nome) ? 'boleto' : /comprov|recibo|pix|ted/i.test(nome) ? 'comprovante' : /contrato/i.test(nome) ? 'contrato' : /nf|nota|danfe|nfs/i.test(nome) ? 'nota' : padrao;
+/* Seletor de arquivos com tipo, usado no lançamento novo. */
+function caixaAnexos(box, padrao) {
+  const itens = [];
+  const desenhar = () => {
+    box.innerHTML = `<div class="lbl">Anexos <span class="muted">nota, boleto, comprovante…</span></div>
+      <div class="anx-lista">${itens.map((x, i) => `<div class="anx-row"><span class="anx-nome">${ic('clip', 14)} ${esc(x.file.name || 'arquivo')}</span><select data-ati="${i}" aria-label="Tipo do anexo">${opts(TIPOS_ANEXO, x.tipo)}</select><button type="button" class="x" data-atx="${i}" aria-label="Remover anexo">×</button></div>`).join('')}</div>
+      <label class="btn sm file">${ic('clip', 14)} ${itens.length ? 'Adicionar outro arquivo' : 'Adicionar foto ou PDF'}<input type="file" accept="image/*,application/pdf" multiple hidden></label>`;
+    $$('[data-ati]', box).forEach(s => s.onchange = () => { itens[+s.dataset.ati].tipo = s.value; });
+    $$('[data-atx]', box).forEach(b => b.onclick = () => { itens.splice(+b.dataset.atx, 1); desenhar(); });
+    const inp = box.querySelector('input[type=file]'); inp.onchange = () => { for (const f of inp.files) itens.push({ file: f, tipo: tipoPorNome(f.name || '', typeof padrao === 'function' ? padrao() : padrao) }); desenhar(); };
+  };
+  desenhar();
+  return { itens, adicionar(file, tipo) { itens.push({ file, tipo }); desenhar(); }, async salvar() { const out = []; for (const x of itens) out.push({ id: await salvarAnexo(x.file), tipo: x.tipo }); return out; } };
+}
 async function salvarAnexo(file) {
   let mime = file.type || 'application/octet-stream', b64;
   if (mime.startsWith('image/')) {
@@ -689,6 +905,7 @@ async function salvarAnexo(file) {
   return id;
 }
 async function verAnexo(id, link) {
+  if (!id && !link) return;
   if (link) { window.open(link, '_blank', 'noopener'); return; }
   try {
     const s = await getDoc(doc(db, 'anexos', id)); if (!s.exists()) { toast('Anexo ainda não disponível neste aparelho (precisa de internet).', 'err'); return; }
@@ -701,24 +918,28 @@ async function verAnexo(id, link) {
    Google Drive: anexos ficam numa pasta da conta do dono
    ========================================================= */
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const DRV = { token: null, exp: 0, carregando: null, enviando: false, erro: '' };
-try { const s = JSON.parse(sessionStorage.getItem('sfgDrive') || 'null'); if (s && s.e > Date.now()) { DRV.token = s.t; DRV.exp = s.e; } } catch (e) { /* sem sessão */ }
+const CAL_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
+const DRV = { token: null, exp: 0, scope: '', carregando: null, enviando: false, erro: '' };
+try { const s = JSON.parse(sessionStorage.getItem('sfgDrive') || 'null'); if (s && s.e > Date.now()) { DRV.token = s.t; DRV.exp = s.e; DRV.scope = s.s || DRIVE_SCOPE; } } catch (e) { /* sem sessão */ }
 const driveConfigurado = () => !!firebaseConfig.driveClientId;
-const driveConectado = () => !!DRV.token && Date.now() < DRV.exp - 60000;
+const agendaAtiva = () => !!(S.agenda && S.agenda.ativo);
+const tokenTem = sc => !!DRV.token && Date.now() < DRV.exp - 60000 && (DRV.scope || '').split(' ').includes(sc);
+const driveConectado = () => tokenTem(DRIVE_SCOPE);
 function carregarGIS() {
   if (window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
   if (DRV.carregando) return DRV.carregando;
   DRV.carregando = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.onload = res; s.onerror = () => { DRV.carregando = null; rej(new Error('Sem acesso ao Google agora. Verifique a internet.')); }; document.head.appendChild(s); });
   return DRV.carregando;
 }
-async function driveToken(interativo) {
-  if (driveConectado()) return DRV.token;
+async function driveToken(interativo, precisa = DRIVE_SCOPE) {
+  if (tokenTem(precisa)) return DRV.token;
   if (!interativo || !driveConfigurado()) return null;
   await carregarGIS();
+  const escopos = [DRIVE_SCOPE, ...(agendaAtiva() || precisa === CAL_SCOPE ? [CAL_SCOPE] : [])].join(' ');
   return new Promise((res, rej) => {
     const c = google.accounts.oauth2.initTokenClient({
-      client_id: firebaseConfig.driveClientId, scope: DRIVE_SCOPE, hint: S.user?.email || '', prompt: '',
-      callback: r => { if (r.error) { rej(new Error('O Google não autorizou: ' + r.error)); return; } DRV.token = r.access_token; DRV.exp = Date.now() + (+r.expires_in || 3600) * 1000; try { sessionStorage.setItem('sfgDrive', JSON.stringify({ t: DRV.token, e: DRV.exp })); } catch (e) { /* ok */ } res(DRV.token); },
+      client_id: firebaseConfig.driveClientId, scope: escopos, include_granted_scopes: true, hint: S.user?.email || '', prompt: '',
+      callback: r => { if (r.error) { rej(new Error('O Google não autorizou: ' + r.error)); return; } DRV.token = r.access_token; DRV.exp = Date.now() + (+r.expires_in || 3600) * 1000; DRV.scope = r.scope || escopos; try { sessionStorage.setItem('sfgDrive', JSON.stringify({ t: DRV.token, e: DRV.exp, s: DRV.scope })); } catch (e) { /* ok */ } if (!tokenTem(precisa)) { rej(new Error(precisa === CAL_SCOPE ? 'A permissão para a Agenda não foi concedida. Marque a opção da Agenda na tela do Google.' : 'A permissão do Drive não foi concedida.')); return; } setTimeout(() => sincronizarAgenda(false), 500); res(DRV.token); },
       error_callback: e => rej(new Error(e && e.type === 'popup_closed' ? 'Autorização do Drive cancelada.' : 'Não consegui abrir a autorização do Google. Permita pop-ups para este site.'))
     });
     c.requestAccessToken();
@@ -754,13 +975,13 @@ async function enviarArquivoDrive(blob, nome, pasta) {
   if (!r || !r.id) throw new Error('O Drive não confirmou o envio.');
   return r;
 }
-function nomeAnexo(ts, mime) {
+function nomeAnexo(ts, mime, tipo) {
   const t = ts[0]; const lotes = ts.map(x => x.lote).filter(l => l && l !== '-');
   const onde = t.quadra && t.quadra !== '-' ? ` - ${t.quadra}${lotes.length ? ' ' + (lotes.length > 4 ? lotes.length + ' lotes' : lotes.join('-')) : ''}` : '';
   const base = `${t.venc || hoje()} ${ts.length > 1 ? baseItem(t) : t.item.replace(/\s*-\s*\S+\s+\S+$/, '')}${t.nfNum ? ' NF ' + t.nfNum : ''}${onde}`;
-  return base.replace(/[\/\\:*?"<>|#%]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 140) + (mime === 'application/pdf' ? '.pdf' : '.jpg');
+  return (base + (tipo ? ' (' + tipoAnexoNome(tipo).toLowerCase() + ')' : '')).replace(/[\/\\:*?"<>|#%]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 150) + (mime === 'application/pdf' ? '.pdf' : '.jpg');
 }
-const anexosPendentes = () => { const m = new Map(); for (const t of S.list) if (t.anexo && !t.anexoLink) (m.get(t.anexo) || m.set(t.anexo, []).get(t.anexo)).push(t); return m; };
+const anexosPendentes = () => { const m = new Map(); for (const t of S.list) for (const a of anexosDe(t)) if (a.id && !a.link) { const e = m.get(a.id) || m.set(a.id, { ids: [], tipo: a.tipo }).get(a.id); e.ids.push(t.id); } return m; };
 async function sincronizarDrive(interativo) {
   if (!driveConfigurado() || DRV.enviando || somenteLeitura() || !navigator.onLine) return;
   const pend = anexosPendentes(); if (!pend.size) return;
@@ -768,15 +989,18 @@ async function sincronizarDrive(interativo) {
   if (!tk) return;
   DRV.enviando = true; DRV.erro = ''; let ok = 0;
   try {
-    for (const [aid, ts] of pend) {
+    const upd = new Map(); const cur = id => upd.get(id) || S.byId.get(id);
+    const aplicar = (aid, ids, link, drive) => { const out = ids.map(cur).filter(Boolean).map(t => comAnexos(t, anexosDe(t).map(x => x.id === aid ? { ...x, link, drive } : x))); out.forEach(t => upd.set(t.id, t)); salvarTitulos(out, { sistema: true }); };
+    for (const [aid, { ids, tipo }] of pend) {
+      const ts = ids.map(cur).filter(Boolean); if (!ts.length) continue;
       const s = await getDoc(doc(db, 'anexos', aid)); if (!s.exists()) continue;
       const a = s.data();
-      if (a.link) { salvarTitulos(ts.map(t => ({ ...t, anexoLink: a.link, anexoDrive: a.drive }))); ok++; continue; }
+      if (a.link) { aplicar(aid, ids, a.link, a.drive); ok++; continue; }
       if (!a.b64) continue;
       const bin = atob(a.b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
       const pasta = await pastaDoMes((ts[0].venc || hoje()).slice(0, 7));
-      const r = await enviarArquivoDrive(new Blob([u8], { type: a.mime }), nomeAnexo(ts, a.mime), pasta);
-      salvarTitulos(ts.map(t => ({ ...t, anexoLink: r.webViewLink, anexoDrive: r.id })));
+      const r = await enviarArquivoDrive(new Blob([u8], { type: a.mime }), nomeAnexo(ts, a.mime, tipo), pasta);
+      aplicar(aid, ids, r.webViewLink, r.id);
       gravar(doc(db, 'anexos', aid), { drive: r.id, link: r.webViewLink, mime: a.mime, nome: a.nome || '', enviado: Date.now() }).catch(onErroEscrita);
       ok++; refreshView();
     }
@@ -786,6 +1010,89 @@ async function sincronizarDrive(interativo) {
 }
 addEventListener('online', () => setTimeout(() => sincronizarDrive(false), 3000));
 ACOES.drive = () => sincronizarDrive(true).then(() => { if (!anexosPendentes().size && driveConectado()) toast('Drive conectado. Nenhum anexo pendente.'); });
+/* ---------- Avisos de vencimento pela Google Agenda ---------- */
+const AG = { enviando: false, erro: '' };
+const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Recife'; } catch (e) { return 'America/Recife'; } })();
+async function calReq(url, opts = {}) {
+  const tk = await driveToken(false, CAL_SCOPE); if (!tk) throw new Error('agenda-desconectada');
+  const r = await fetch('https://www.googleapis.com/calendar/v3/' + url, { method: opts.method || 'GET', headers: { Authorization: 'Bearer ' + tk, ...(opts.json ? { 'Content-Type': 'application/json' } : {}) }, body: opts.json ? JSON.stringify(opts.json) : undefined });
+  if (r.status === 401) { DRV.token = null; try { sessionStorage.removeItem('sfgDrive'); } catch (e) { /* ok */ } throw new Error('agenda-desconectada'); }
+  if (r.status === 404 || r.status === 410) return null;
+  if (r.status === 204) return {};
+  if (!r.ok) { let m = ''; try { m = JSON.stringify(await r.json()); } catch (e) { /* ok */ } if (r.status === 403 && /accessNotConfigured|SERVICE_DISABLED|has not been used/i.test(m)) throw new Error('api-desativada'); throw new Error('A Agenda respondeu ' + r.status); }
+  return r.json();
+}
+function eventosAgenda() {
+  const h = hoje(), lim = addDays(h, 60), dias = new Map();
+  for (const t of S.list) { if (pago(t) || !t.venc) continue; const d = t.venc < h ? h : t.venc; if (d > lim) continue; const g = dias.get(d) || dias.set(d, { pag: [], rec: [], venc: [] }).get(d); (t.venc < h ? g.venc : t.valor < 0 ? g.pag : g.rec).push(t); }
+  const cfg = S.agenda || {}; const hora = cfg.hora || '08:00';
+  const lin = es => es.map(e => { const x = entTxt(e); return `• ${x[1]}${x[2] && x[2] !== '-' ? ' (' + x[2] + ')' : ''}: ${brl2(x[3])}`; }).join('\n');
+  const out = new Map();
+  for (const [d, g] of dias) {
+    const tot = a => Math.abs(sum(a, t => t.valor)); const partes = [];
+    if (g.venc.length) partes.push(`${g.venc.length} vencida(s) ${brl(tot(g.venc))}`);
+    if (g.pag.length) partes.push(`pagar ${brl(tot(g.pag))} (${g.pag.length})`);
+    if (g.rec.length) partes.push(`receber ${brl(tot(g.rec))} (${g.rec.length})`);
+    const desc = [g.venc.length ? 'VENCIDAS EM ABERTO\n' + lin(agrupar(g.venc, 'venc')) : '', g.pag.length ? 'A PAGAR\n' + lin(agrupar(g.pag, 'venc')) : '', g.rec.length ? 'A RECEBER\n' + lin(agrupar(g.rec, 'venc')) : '', 'Abrir o SFG Financeiro: ' + location.origin + location.pathname + '#/pagar'].filter(Boolean).join('\n\n');
+    const [hh, mm] = hora.split(':').map(Number); const fimH = `${String(hh).padStart(2, '0')}:${String(mm + 15).padStart(2, '0')}`;
+    const ev = { summary: 'SFG: ' + partes.join(' · ').replace(/ /g, ' '), description: desc.replace(/ /g, ' '), start: { dateTime: `${d}T${hora}:00`, timeZone: TZ }, end: { dateTime: `${d}T${fimH}:00`, timeZone: TZ },
+      reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 0 }, ...(cfg.vespera !== false ? [{ method: 'popup', minutes: 24 * 60 }] : [])] }, colorId: g.venc.length ? '11' : '9', transparency: 'transparent' };
+    out.set(d, ev);
+  }
+  return out;
+}
+async function sincronizarAgenda(interativo) {
+  if (!driveConfigurado() || !agendaAtiva() || AG.enviando || somenteLeitura() || !navigator.onLine) return;
+  let tk; try { tk = await driveToken(interativo, CAL_SCOPE); } catch (e) { AG.erro = e.message; if (interativo) toast(e.message, 'err'); refreshView(); return; }
+  if (!tk) return;
+  AG.enviando = true; AG.erro = ''; let n = 0;
+  const cfg = clone(S.agenda || {}); cfg.eventos = cfg.eventos || {};
+  try {
+    if (!cfg.calId || !(await calReq('calendars/' + encodeURIComponent(cfg.calId)))) {
+      const c = await calReq('calendars', { method: 'POST', json: { summary: 'SFG Vencimentos', description: 'Vencimentos do SFG Financeiro. Criado e atualizado pelo app.', timeZone: TZ } });
+      cfg.calId = c.id; cfg.eventos = {};
+    }
+    const base = 'calendars/' + encodeURIComponent(cfg.calId) + '/events';
+    const evs = eventosAgenda(), h = hoje();
+    for (const [d, ev] of evs) {
+      const hs = String(hashTxt(JSON.stringify(ev))); const at = cfg.eventos[d];
+      if (at && at.h === hs) continue;
+      let r = at ? await calReq(base + '/' + encodeURIComponent(at.id), { method: 'PUT', json: ev }) : null;
+      if (!r) r = await calReq(base, { method: 'POST', json: ev });
+      cfg.eventos[d] = { id: r.id, h: hs }; n++;
+    }
+    for (const d of Object.keys(cfg.eventos)) {
+      if (evs.has(d)) continue;
+      if (d >= h) { await calReq(base + '/' + encodeURIComponent(cfg.eventos[d].id), { method: 'DELETE' }); n++; }
+      delete cfg.eventos[d];
+    }
+    cfg.ultima = Date.now(); S.agenda = cfg; gravar(doc(db, 'config', 'agenda'), cfg).catch(onErroEscrita);
+    if (interativo) toast(n ? `Agenda atualizada (${n} dia(s) alterado(s))` : 'Agenda já estava em dia');
+  } catch (e) {
+    AG.erro = e.message === 'api-desativada' ? 'A Google Calendar API está desativada no projeto do Google Cloud. Ative em console.cloud.google.com/apis/library/calendar-json.googleapis.com (mesmo projeto do Drive) e tente de novo.' : e.message === 'agenda-desconectada' ? 'A autorização do Google expirou. Toque em Atualizar agenda.' : e.message;
+    if (cfg.calId && cfg.calId !== (S.agenda || {}).calId) { S.agenda = { ...(S.agenda || {}), calId: cfg.calId, eventos: cfg.eventos }; gravar(doc(db, 'config', 'agenda'), S.agenda).catch(onErroEscrita); }
+    if (interativo) toast(AG.erro, 'err');
+  } finally { AG.enviando = false; refreshView(); }
+}
+let _agT = 0; const agendarAgenda = () => { clearTimeout(_agT); _agT = setTimeout(() => { if (agendaAtiva() && tokenTem(CAL_SCOPE)) sincronizarAgenda(false); }, 15000); };
+ACOES.agAtivar = () => { S.agenda = { ...(S.agenda || {}), ativo: true, hora: S.agenda?.hora || '08:00', vespera: S.agenda?.vespera !== false }; gravar(doc(db, 'config', 'agenda'), S.agenda).catch(onErroEscrita); sincronizarAgenda(true); };
+ACOES.agSync = () => sincronizarAgenda(true);
+ACOES.agDesl = async () => { if (await confirmar('Parar de atualizar a agenda "SFG Vencimentos"? Os eventos que já estão lá continuam; você pode apagar a agenda no Google Agenda.', 'Desligar', false)) { S.agenda = { ...(S.agenda || {}), ativo: false }; gravar(doc(db, 'config', 'agenda'), S.agenda).catch(onErroEscrita); refreshView(); } };
+ACOES.agHora = () => {
+  const c = S.agenda || {};
+  const f = folha('Horário dos avisos', `<form class="form" id="fx"><label>Avisar no dia do vencimento às<select name="hora">${opts(['06:00', '07:00', '08:00', '09:00', '10:00', '12:00', '14:00', '18:00'], c.hora || '08:00')}</select></label><label class="chk"><input type="checkbox" name="vespera" ${c.vespera !== false ? 'checked' : ''}> Avisar também na véspera, no mesmo horário</label><div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
+  f.el.querySelector('#fx').onsubmit = e => { e.preventDefault(); S.agenda = { ...c, hora: e.target.hora.value, vespera: e.target.vespera.checked }; gravar(doc(db, 'config', 'agenda'), S.agenda).catch(onErroEscrita); f.fechar(); sincronizarAgenda(true); };
+};
+function cardAgenda() {
+  if (!driveConfigurado()) return '';
+  const c = S.agenda || {}; const at = agendaAtiva();
+  return `<div class="card"><h2>Avisos de vencimento no celular</h2>
+    <p class="muted small">O app cria no seu Google Agenda um calendário chamado <b>SFG Vencimentos</b>, com um evento em cada dia que tem conta a pagar ou a receber (próximos 60 dias) e as contas vencidas no dia de hoje. A notificação chega pelo Google Agenda no celular, mesmo com o SFG fechado.</p>
+    ${at ? `<div class="kv"><span>Situação</span><b>${AG.enviando ? 'Atualizando…' : 'Ligado'}</b></div><div class="kv"><span>Aviso</span><b>${esc(c.hora || '08:00')}${c.vespera !== false ? ', no dia e na véspera' : ', no dia'}</b><button class="btn sm rw" data-act="agHora">Alterar</button></div><div class="kv"><span>Última atualização</span><b>${c.ultima ? quando(c.ultima) : 'ainda não'}</b></div>` : ''}
+    ${AG.erro ? `<p class="erro small">${esc(AG.erro)}</p>` : ''}
+    <div class="acts left rw">${at ? `<button class="btn primary" data-act="agSync">Atualizar agenda agora</button><button class="btn" data-act="agDesl">Desligar</button>` : `<button class="btn primary" data-act="agAtivar">Ligar avisos na Google Agenda</button>`}</div>
+    <p class="muted small">No iPhone: em Ajustes, Calendário, Contas, adicione a conta Google ${esc(S.user?.email || '')} e ligue Calendários (ou use o app Google Agenda). Depois de ligado, a agenda se atualiza sozinha sempre que o app estiver conectado ao Google; se ficar mais de um dia sem atualizar, o Início mostra um lembrete.</p></div>`;
+}
 function cardDrive() {
   if (!driveConfigurado()) return `<div class="card"><h2>Google Drive</h2><p class="muted">Os anexos vão para uma pasta "SFG Financeiro" no seu Google Drive assim que a credencial do Google for configurada.</p></div>`;
   const pend = anexosPendentes().size; const lk = S.drive && S.drive.raiz && S.drive.raiz.link;
@@ -804,7 +1111,7 @@ const listaSel = new Set();
 function linhaTitulo(t, o = {}) {
   const h = hoje(); const venc = !pago(t) && t.venc < h; const hj = !pago(t) && t.venc === h;
   const d = o.data === 'pag' ? (t.pag || t.venc) : t.venc;
-  const meta = `<span class="loc">${esc(t.quadra && t.quadra !== '-' ? t.quadra + (t.lote && t.lote !== '-' ? ' ' + t.lote : '') : 'Geral')}</span>` + [t.destino, t.forn, t.nf ? (t.nfNum ? 'NF ' + t.nfNum : 'com NF') : '', t.anexo ? 'anexo' : ''].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('') + (variasEmpresas() ? (empDiverge(t) ? `<span class="chip warn" title="CNPJ diferente do CNPJ da obra">${esc(empPorId(t.emp).nome)} ≠ obra</span>` : !empDef(t) ? '<span class="chip">sem CNPJ</span>' : '') : '');
+  const meta = `<span class="loc">${esc(t.quadra && t.quadra !== '-' ? t.quadra + (t.lote && t.lote !== '-' ? ' ' + t.lote : '') : 'Geral')}</span>` + [t.destino, t.forn, t.nf ? (t.nfNum ? 'NF ' + t.nfNum : 'com NF') : '', anexosDe(t).length ? (anexosDe(t).length > 1 ? anexosDe(t).length + ' anexos' : 'anexo') : '', t.rec ? 'recorrente' : ''].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('') + (variasEmpresas() ? (empDiverge(t) ? `<span class="chip warn" title="CNPJ diferente do CNPJ da obra">${esc(empPorId(t.emp).nome)} ≠ obra</span>` : !empDef(t) ? '<span class="chip">sem CNPJ</span>' : '') : '');
   return `<div class="tr ${o.sel ? 'selmode' : ''} ${listaSel.has(t.id) ? 'sel' : ''}" data-act="${o.sel ? 'tsel' : 'abrir'}" data-id="${t.id}">
     ${o.sel ? `<span class="cb">${listaSel.has(t.id) ? '✓' : ''}</span>` : ''}
     ${o.semData ? '' : `<div class="td-date"><b>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '—'}</b><small>${d ? d.slice(0, 4) : ''}</small></div>`}
@@ -929,7 +1236,8 @@ VIEWS.inicio = {
     const agenda = dias.map(g => { if (restam <= 0) return ''; const es = agrupar(g.ts, 'venc').slice(0, restam); restam -= es.length; const tot = sum(g.ts, t => t.valor);
       return `<div class="ag-dia"><h3 class="${g.k === 'vencidas' ? 'neg' : ''}"><span>${nomeDia(g.k)}</span><span class="fig ${cls(tot)}">${brl(tot)}</span></h3>${es.map(e => linhaEntrada(e, { baixa: true, semData: true })).join('')}</div>`; }).join('');
     const qs = E().quadras.map(resumoQuadra).sort((a, b) => b.proj - a.proj); const qmax = Math.max(1, ...qs.map(q => Math.abs(q.proj)));
-    el.innerHTML = `<section class="extrato-hero">
+    const agVelha = agendaAtiva() && !somenteLeitura() && (!S.agenda.ultima || Date.now() - S.agenda.ultima > 864e5);
+    el.innerHTML = `${agVelha ? `<div class="alerta-caixa"><span>Os avisos da Google Agenda não são atualizados desde ${S.agenda.ultima ? quando(S.agenda.ultima) : 'a ativação'}.</span><button class="btn sm" data-act="agSync">Atualizar agenda</button></div>` : ''}<section class="extrato-hero">
       <div class="eh-topo">
         <div class="eh-saldo"><p class="eh-lab">Saldo em caixa, ${esc(dataLonga)}</p><p class="eh-val fig ${sd.total < 0 ? 'neg' : ''}">${brl(sd.total)}</p>
           <p class="eh-contas">${sd.contas.map(c => `<span>${esc(c.nome)} <b class="fig">${brl(c.saldo)}</b></span>`).join('')}</p></div>
@@ -1661,20 +1969,23 @@ ACOES.ics = () => {
    Relatório mensal (PDF)
    ========================================================= */
 let relMes = '';
-function dadosRelatorio(m) {
+const listaEmp = emp => emp ? S.list.filter(t => empT(t) === emp) : S.list;
+const contasEmp = emp => E().contas.filter(c => !emp || empConta(c.nome) === emp);
+function dadosRelatorio(m, emp) {
   const ini = m + '-01', fim = addDays(addMonths(ini, 1), -1), h = hoje();
-  const pagos = S.list.filter(pago); const base = sum(E().contas, c => +c.inicial || 0);
+  const L = listaEmp(emp);
+  const pagos = L.filter(pago); const base = sum(contasEmp(emp), c => +c.inicial || 0);
   const ate = d => base + sum(pagos.filter(t => (t.pag || t.venc) <= d), t => t.valor + (t.juros || 0));
   const mes = pagos.filter(t => { const d = t.pag || t.venc; return d >= ini && d <= fim; });
   const porDest = {}; for (const t of mes) if (t.valor < 0 || t.juros) { if (t.valor < 0) porDest[t.destino] = (porDest[t.destino] || 0) + t.valor; if (t.juros) porDest['Juros e Multa'] = (porDest['Juros e Multa'] || 0) + t.juros; }
-  const ab = S.list.filter(t => !pago(t)); const pj = projecao();
+  const ab = L.filter(t => !pago(t)); const pj = emp ? projecao(L, ate(h)) : projecao();
   const fluxo = [...Array(6)].map((_, i) => { const mi = addMonths(h.slice(0, 7) + '-01', i), mf = addDays(addMonths(mi, 1), -1); let v = pj.base; for (const x of pj.dias) if (x.d <= mf) v = x.v; return [mesNome(mi.slice(0, 7)), v]; });
   return {
     m, ini, fim, saldoIni: ate(addDays(ini, -1)), saldoFim: ate(fim),
     entradas: sum(mes.filter(t => t.valor > 0 && t.destino !== 'Aporte'), t => t.valor), aportes: sum(mes.filter(t => t.destino === 'Aporte'), t => t.valor),
     saidas: sum(mes, t => Math.min(0, t.valor) + Math.min(0, t.juros || 0)),
     porDest: Object.entries(porDest).sort((a, b) => a[1] - b[1]),
-    quadras: E().quadras.map(resumoQuadra),
+    quadras: E().quadras.filter(q => !emp || empDaObra(obraDe(q)) === emp).map(resumoQuadra),
     vencidas: agrupar(ab.filter(t => t.valor < 0 && t.venc < h).sort((a, b) => a.venc.localeCompare(b.venc)), 'venc'),
     prox: agrupar(ab.filter(t => t.venc >= h && t.venc <= addDays(h, 30)).sort((a, b) => a.venc.localeCompare(b.venc)), 'venc'),
     fluxo, min: pj.min
@@ -1686,13 +1997,15 @@ VIEWS.relatorios = {
   refresh(el) {
     const h = hoje(); if (!relMes) relMes = h.slice(0, 7);
     const ms = [...Array(18)].map((_, i) => addMonths(h.slice(0, 7) + '-01', -i).slice(0, 7));
-    const r = dadosRelatorio(relMes);
-    el.innerHTML = `<div class="filtros card"><label class="tgl">Mês <select id="rM">${opts(ms.map(m => [m, mesNome(m)]), relMes)}</select></label><button class="btn primary" id="rPdf">Baixar PDF</button><span class="muted small">O PDF traz o resumo do mês, despesas por destino, resultado por quadra, contas vencidas, próximos 30 dias e o fluxo projetado.</span></div>
+    if (relEmp && !empPorId(relEmp)) relEmp = '';
+    const r = dadosRelatorio(relMes, relEmp);
+    el.innerHTML = `<div class="filtros card"><label class="tgl">Mês <select id="rM">${opts(ms.map(m => [m, mesNome(m)]), relMes)}</select></label>${variasEmpresas() ? `<label class="tgl">Empresa <select id="rE">${opts(empOpts(), relEmp, 'Grupo consolidado')}</select></label>` : ''}<button class="btn primary" id="rPdf">Baixar PDF</button><span class="muted small">O PDF traz o resumo do mês, despesas por destino, resultado por quadra, contas vencidas, próximos 30 dias e o fluxo projetado.</span></div>
     <div class="grid kpis k4">${kpi('Saldo inicial', brl(r.saldoIni), dBR(addDays(r.ini, -1)), cls(r.saldoIni))}${kpi('Entradas', brl(r.entradas), r.aportes ? 'aportes ' + brl(r.aportes) : '', 'pos')}${kpi('Saídas', brl(r.saidas), 'inclui juros', 'neg')}${kpi('Saldo final', brl(r.saldoFim), dBR(r.fim), cls(r.saldoFim))}</div>
     <div class="grid two"><div class="card"><h2>Saídas por destino</h2><table class="tbl"><tbody>${r.porDest.map(([d, v]) => `<tr><td class="l">${esc(d)}</td><td class="neg">${brl(v)}</td></tr>`).join('') || '<tr><td class="l muted">Sem saídas no mês</td></tr>'}</tbody></table></div>
     <div class="card"><h2>Fluxo projetado</h2><table class="tbl"><tbody>${r.fluxo.map(([n, v]) => `<tr><td class="l">${esc(n)}</td><td class="${cls(v)}">${brl(v)}</td></tr>`).join('')}</tbody></table></div></div>`;
     $('#rM', el).onchange = e => { relMes = e.target.value; this.refresh(el); };
-    $('#rPdf', el).onclick = () => gerarPDF(relMes).catch(e => { console.error(e); toast('Erro ao gerar PDF: ' + e.message, 'err'); });
+    const rE = $('#rE', el); if (rE) rE.onchange = e => { relEmp = e.target.value; this.refresh(el); };
+    $('#rPdf', el).onclick = () => gerarPDF(relMes, relEmp).catch(e => { console.error(e); toast('Erro ao gerar PDF: ' + e.message, 'err'); });
   }
 };
 async function imgParaPNG(url, w) {
@@ -1700,16 +2013,18 @@ async function imgParaPNG(url, w) {
   const r = (img.naturalHeight || 508) / (img.naturalWidth || 908); const c = document.createElement('canvas'); c.width = w; c.height = Math.round(w * r);
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return { data: c.toDataURL('image/png'), r };
 }
-async function gerarPDF(m) {
+let relEmp = '';
+const nomeEmpPDF = emp => { const x = emp && empPorId(emp); return x ? x.nome + (x.cnpj ? ' · CNPJ ' + fCnpj(x.cnpj) : '') : (variasEmpresas() ? 'Grupo consolidado' : 'SFG Incorporadora'); };
+async function gerarPDF(m, emp) {
   toast('Gerando PDF…');
-  const r = dadosRelatorio(m);
+  const r = dadosRelatorio(m, emp);
   const P = s => String(s).replace(/\u2212/g, '-').replace(/[\u202f\u00a0]/g, ' ');
   const pdf = new jsPDF({ unit: 'pt', format: 'a4' }); const W = pdf.internal.pageSize.getWidth();
   const NAVY = [11, 32, 70];
   try { const lg = await imgParaPNG(LOGO_COMPLETO, 480); pdf.addImage(lg.data, 'PNG', 36, 16, 96, 96 * lg.r); } catch (e) { /* sem logo */ }
   pdf.setDrawColor(...NAVY); pdf.setLineWidth(1.2); pdf.line(36, 92, W - 36, 92);
   pdf.setTextColor(...NAVY); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(17); pdf.text('Relatório financeiro', W - 36, 40, { align: 'right' });
-  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11); pdf.text(P(`${mesNome(m)} · ${E().local}`), W - 36, 58, { align: 'right' });
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11); pdf.text(P(`${mesNome(m)} · ${nomeEmpPDF(emp)}`), W - 36, 58, { align: 'right' });
   pdf.setFontSize(8.5); pdf.setTextColor(91, 107, 130); pdf.text(P('SFG Incorporadora · gerado em ' + new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })), W - 36, 74, { align: 'right' });
   let y = 110; pdf.setTextColor(15, 27, 45);
   const titulo = t => { if (y > 740) { pdf.addPage(); y = 50; } pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(...NAVY); pdf.text(t, 36, y); y += 8; };
@@ -1728,7 +2043,7 @@ async function gerarPDF(m) {
   tabela(['Mês', 'Saldo projetado'], r.fluxo.map(([n, v]) => [n, brl(v)]), [1]);
   pdf.setFontSize(9); pdf.setTextColor(91, 107, 130); pdf.text(P(`Menor saldo projetado: ${brl(r.min.v)} em ${dBR(r.min.d)}.`), 36, y);
   const np = pdf.getNumberOfPages(); for (let i = 1; i <= np; i++) { pdf.setPage(i); pdf.setFontSize(8); pdf.setTextColor(140); pdf.text(`${i} / ${np}`, W - 36, pdf.internal.pageSize.getHeight() - 20, { align: 'right' }); }
-  await baixarArquivo(pdf.output('blob'), `SFG Relatório ${m}.pdf`);
+  await baixarArquivo(pdf.output('blob'), `SFG Relatório ${m}${emp ? ' ' + (empPorId(emp)?.nome || '') : ''}.pdf`);
 }
 
 /* =========================================================
@@ -1804,6 +2119,300 @@ VIEWS.empresas = {
         <p class="muted small">Aportes e transferências entre CNPJs (destino Aporte) ficam fora do resultado, para não contar a mesma receita duas vezes.</p></div>` : ''}`;
   }
 };
+/* ---------- Contas recorrentes ---------- */
+const FREQ = [['1', 'Mensal'], ['2', 'Bimestral'], ['3', 'Trimestral'], ['6', 'Semestral'], ['12', 'Anual']];
+const HORIZ_REC = 6;
+const recorrencias = () => Object.values((S.recorrencias && S.recorrencias.itens) || {}).map(v => { try { return JSON.parse(v); } catch (e) { return null; } }).filter(Boolean);
+function salvarRec(r) {
+  S.recorrencias = { itens: { ...((S.recorrencias && S.recorrencias.itens) || {}), [r.id]: JSON.stringify(r) } };
+  gravar(doc(db, 'config', 'recorrencias'), { itens: { [r.id]: JSON.stringify(r) } }, { merge: true }).catch(onErroEscrita);
+}
+const tagMes = d => ` (${MES3[+d.slice(5, 7) - 1]}/${d.slice(2, 4)})`;
+const semTag = s => s.replace(/\s\((jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\/\d{2}\)$/, '');
+let _gerandoRec = false;
+function gerarRecorrencias() {
+  if (_gerandoRec || somenteLeitura() || !S.user || !S.loaded.titulos || S.recorrencias === undefined) return;
+  const lim = addMonths(hoje(), HORIZ_REC); const novos = [], upd = [];
+  for (const r of recorrencias()) {
+    if (!r.ativo || !r.inicio) continue;
+    let ult = r.ultimo || '', mudou = false;
+    for (let k = 0; k < 600; k++) {
+      const base = addMonths(r.inicio, k * (r.passo || 1));
+      if (base > lim || (r.fim && base > r.fim)) break;
+      if (ult && base <= ult) continue;
+      const id = 'rc' + r.id + base.replace(/-/g, '');
+      if (!S.byId.has(id)) {
+        const venc = r.util ? proximoDiaUtil(base) : base;
+        const t = { id, item: r.item + tagMes(base), valor: r.valor, juros: 0, nf: 0, nfNum: '', local: r.local || E().obras[0], quadra: r.quadra || '-', lote: '-', destino: r.destino, venc, status: 'aberto', forn: r.forn || '', obs: r.obs || '', grupo: 'rec' + r.id, rec: r.id, criado: Date.now() };
+        if (venc !== base) t.vencOrig = base; if (r.emp) t.emp = r.emp; novos.push(t);
+      }
+      ult = base; mudou = true;
+    }
+    if (mudou) upd.push({ ...r, ultimo: ult });
+  }
+  if (!novos.length && !upd.length) return;
+  _gerandoRec = true;
+  if (novos.length) salvarTitulos(novos, { acao: 'recorrente' });
+  upd.forEach(salvarRec);
+  setTimeout(() => { _gerandoRec = false; }, 3000);
+}
+function proxRec(r) { const ab = S.list.filter(t => t.rec === r.id && !pago(t)).sort((a, b) => a.venc.localeCompare(b.venc)); return ab[0]; }
+VIEWS.recorrentes = {
+  titulo: 'Contas recorrentes',
+  refresh(el) {
+    const rs = recorrencias().sort((a, b) => (b.ativo - a.ativo) || a.item.localeCompare(b.item));
+    const mensal = r => r.valor / (r.passo || 1);
+    const at = rs.filter(r => r.ativo);
+    el.innerHTML = `<div class="grid kpis k4">${kpi('Ativas', at.length, rs.length - at.length ? (rs.length - at.length) + ' encerrada(s) ou pausada(s)' : '', '')}${kpi('Saídas fixas por mês', brl(sum(at.filter(r => r.valor < 0), mensal)), 'média mensal', 'neg')}${kpi('Entradas fixas por mês', brl(sum(at.filter(r => r.valor > 0), mensal)), 'média mensal', 'pos')}${kpi('Lançadas em aberto', S.list.filter(t => t.rec && !pago(t)).length, 'próximos ' + HORIZ_REC + ' meses', '')}</div>
+      <div class="card"><h2>Contas recorrentes <button class="btn sm primary rw" data-act="recNova">Nova conta recorrente</button></h2>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Descrição</th><th>Valor</th><th class="l">Repete</th><th class="l">Próximo vencimento</th><th class="l">Termina</th>${variasEmpresas() ? '<th class="l">CNPJ</th>' : ''}<th class="l">Situação</th></tr></thead><tbody>
+      ${rs.map(r => { const p = proxRec(r); return `<tr class="click" data-act="recEd" data-id="${esc(r.id)}"><td class="l"><b>${esc(r.item)}</b><br><span class="muted small">${esc([r.destino, r.forn, r.quadra && r.quadra !== '-' ? 'Quadra ' + r.quadra : ''].filter(Boolean).join(' · '))}</span></td><td class="${cls(r.valor)}">${brl2(r.valor)}</td><td class="l">${FREQ.find(x => +x[0] === (r.passo || 1))?.[1] || ''}, dia ${+r.inicio.slice(8, 10)}</td><td class="l">${p ? dBR(p.venc) : '—'}</td><td class="l">${r.fim ? dBR(r.fim) : 'sem data final'}</td>${variasEmpresas() ? `<td class="l">${esc(empPorId(r.emp)?.nome || '—')}</td>` : ''}<td class="l"><span class="chip ${r.ativo ? 'ok' : ''}">${r.ativo ? 'Ativa' : 'Pausada'}</span></td></tr>`; }).join('') || `<tr><td class="l muted" colspan="7">Nenhuma conta recorrente. Crie aqui ou marque "Conta recorrente" ao lançar.</td></tr>`}</tbody></table></div>
+      <p class="muted small">O app mantém os próximos ${HORIZ_REC} meses de cada conta lançados em Contas a pagar ou a receber e cria os meses seguintes sozinho, sempre que alguém com permissão de edição abre o app. Excluir um mês não faz ele voltar.</p></div>`;
+  }
+};
+ACOES.recNova = () => formNovo({ recorrente: true });
+ACOES.recEd = d => {
+  const r = recorrencias().find(x => x.id === d.id); if (!r) return;
+  const ab = S.list.filter(t => t.rec === r.id && !pago(t));
+  const f = folha('Conta recorrente', `<form class="form" id="fx">
+    <label>Descrição<input name="item" required value="${esc(r.item)}"></label>
+    <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required value="${fNum2.format(Math.abs(r.valor))}"></label><label>Destino<select name="destino">${optsDestino(r.destino)}</select></label></div>
+    <div class="g2"><label>Fornecedor / cliente<input name="forn" value="${esc(r.forn || '')}"></label><label>Termina em <span class="muted">(opcional)</span><input type="date" name="fim" value="${esc(r.fim || '')}"></label></div>
+    ${variasEmpresas() ? `<label>CNPJ da nota / pagamento<select name="emp">${opts(empOpts(), r.emp || '', 'Escolha o CNPJ…')}</select></label>` : ''}
+    <label class="chk"><input type="checkbox" name="ativo" ${r.ativo ? 'checked' : ''}> Ativa (desmarque para pausar)</label>
+    ${ab.length ? `<label class="chk"><input type="checkbox" name="aplicar" checked> Aplicar também aos ${ab.length} mês(es) já lançados em aberto</label>` : ''}
+    <p class="muted small">Repete ${(FREQ.find(x => +x[0] === (r.passo || 1))?.[1] || '').toLowerCase()} desde ${dBR(r.inicio)}. Criada por ${quem(r.por)}.</p>
+    <div class="acts"><button type="button" class="btn danger ghost" id="rDel">Excluir</button><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
+  const F = f.el.querySelector('#fx');
+  F.onsubmit = e => {
+    e.preventDefault(); const v = parseBR(F.valor.value); if (!(v > 0)) { toast('Valor inválido', 'err'); return; }
+    const n = { ...r, item: F.item.value.trim(), valor: Math.sign(r.valor || -1) * r2(v), destino: F.destino.value, forn: F.forn.value.trim(), fim: F.fim.value || '', ativo: F.ativo.checked };
+    if (F.emp) n.emp = F.emp.value;
+    salvarRec(n);
+    if (F.aplicar && F.aplicar.checked) {
+      const mud = ab.filter(t => !n.fim || (t.vencOrig || t.venc) <= n.fim).map(t => { const x = { ...t, item: n.item + (t.item.match(/\s\(\w{3}\/\d{2}\)$/) || [''])[0], valor: n.valor, destino: n.destino, forn: n.forn }; if (n.emp) x.emp = n.emp; return x; });
+      if (mud.length) salvarTitulos(mud);
+      const fora = n.fim ? ab.filter(t => (t.vencOrig || t.venc) > n.fim) : []; if (fora.length) excluirTitulos(fora.map(t => t.id));
+    }
+    f.fechar(); toast('Conta recorrente salva');
+  };
+  F.querySelector('#rDel').onclick = async () => {
+    if (!(await confirmar(`Excluir a conta recorrente <b>${esc(r.item)}</b>?${ab.length ? ` Os ${ab.length} mês(es) já lançados em aberto também serão excluídos. Os já pagos ficam.` : ''}`, 'Excluir'))) return;
+    gravar(doc(db, 'config', 'recorrencias'), { itens: { [r.id]: deleteField() } }, { merge: true }).catch(onErroEscrita);
+    if (S.recorrencias?.itens) delete S.recorrencias.itens[r.id];
+    if (ab.length) excluirTitulos(ab.map(t => t.id));
+    f.fechar(); toast('Conta recorrente excluída');
+  };
+};
+
+/* ---------- Demonstrativos: DRE, DFC e Balanço (gerenciais) ---------- */
+let demEmp = '', demAno = '', demMes = '', demReg = 'caixa', demAba = 'dre';
+const FIN_REC = ['Rendimento'];
+const valDem = t => (t.valor || 0);
+function dreDe(L, ini, fim, regime) {
+  const noPer = t => regime === 'caixa' ? pago(t) && (t.pag || t.venc) >= ini && (t.pag || t.venc) <= fim : t.venc >= ini && t.venc <= fim;
+  const ts = L.filter(t => noPer(t) && secaoDe(t.destino) !== 'aporte');
+  const by = f => { const o = {}; for (const t of ts.filter(f)) o[t.destino] = (o[t.destino] || 0) + valDem(t); return o; };
+  const rec = by(t => secaoDe(t.destino) === 'rec' && !FIN_REC.includes(t.destino));
+  const imp = sum(ts.filter(t => t.destino === 'Impostos'), valDem);
+  const custo = by(t => secaoDe(t.destino) === 'op');
+  const desp = by(t => secaoDe(t.destino) === 'nonop' && t.destino !== 'Impostos');
+  const fin = sum(ts.filter(t => FIN_REC.includes(t.destino)), valDem);
+  const juros = sum(L.filter(t => pago(t) && (regime === 'caixa' ? (t.pag || t.venc) >= ini && (t.pag || t.venc) <= fim : t.venc >= ini && t.venc <= fim)), t => t.juros || 0);
+  const S_ = o => sum(Object.values(o), v => v);
+  const rb = S_(rec), rl = rb + imp, cu = S_(custo), lb = rl + cu, de = S_(desp), ro = lb + de, res = ro + fin + juros;
+  return { rec, imp, custo, desp, fin, juros, rb, rl, cu, lb, de, ro, res };
+}
+function dfcDe(L, contas, ini, fim) {
+  const base = sum(contas, c => +c.inicial || 0);
+  const real = L.filter(pago); const dt = t => t.pag || t.venc;
+  const antes = real.filter(t => dt(t) < ini), per = real.filter(t => dt(t) >= ini && dt(t) <= fim);
+  const v = t => (t.valor || 0) + (t.juros || 0);
+  const g = f => sum(per.filter(f), v);
+  const sec = t => secaoDe(t.destino);
+  const o = {
+    ini: base + sum(antes, v),
+    receb: g(t => sec(t) === 'rec' && !FIN_REC.includes(t.destino)),
+    obra: g(t => sec(t) === 'op'),
+    desp: g(t => sec(t) === 'nonop' && t.destino !== 'Impostos'),
+    imp: g(t => t.destino === 'Impostos'),
+    fin: g(t => FIN_REC.includes(t.destino)),
+    apIn: sum(per.filter(t => sec(t) === 'aporte' && v(t) > 0), v), apOut: sum(per.filter(t => sec(t) === 'aporte' && v(t) < 0), v)
+  };
+  o.oper = o.receb + o.obra + o.desp + o.imp + o.fin; o.finc = o.apIn + o.apOut; o.vari = o.oper + o.finc; o.fim = o.ini + o.vari;
+  return o;
+}
+function balancoDe(L, emp, D) {
+  const cs = contasEmp(emp), nomes = new Set(cs.map(c => c.nome)), ini = sum(cs, c => +c.inicial || 0);
+  const v = t => (t.valor || 0) + (t.juros || 0); const dt = t => t.pag || t.venc;
+  const realL = L.filter(t => pago(t) && dt(t) <= D);
+  const caixaTeo = ini + sum(realL, v);
+  const dispon = emp ? ini + sum(S.list.filter(t => pago(t) && dt(t) <= D && nomes.has(t.conta || '')), v) : caixaTeo;
+  const ab = L.filter(t => !pago(t) || dt(t) > D);
+  const lim = addDays(D, 365); const ap = t => secaoDe(t.destino) === 'aporte';
+  const o = {
+    dispon, inter: caixaTeo - dispon,
+    recCP: sum(ab.filter(t => t.valor > 0 && t.venc <= lim), t => t.valor), recLP: sum(ab.filter(t => t.valor > 0 && t.venc > lim), t => t.valor),
+    pagCP: -sum(ab.filter(t => t.valor < 0 && t.venc <= lim), t => t.valor), pagLP: -sum(ab.filter(t => t.valor < 0 && t.venc > lim), t => t.valor),
+    capital: ini, aportes: sum(realL.filter(ap), v) + sum(ab.filter(ap), t => t.valor),
+    resReal: sum(realL.filter(t => !ap(t)), v), resAReal: sum(ab.filter(t => !ap(t)), t => t.valor)
+  };
+  o.ativo = o.dispon + Math.max(0, o.inter) + o.recCP + o.recLP; o.passivo = o.pagCP + o.pagLP + Math.max(0, -o.inter); o.pl = o.capital + o.aportes + o.resReal + o.resAReal;
+  return o;
+}
+function periodosDem() {
+  if (demMes) { const ini = `${demAno}-${demMes}-01`; return [{ ini, fim: addDays(addMonths(ini, 1), -1), nome: MES3[+demMes - 1] + '/' + demAno.slice(2) }]; }
+  const ms = [...Array(12)].map((_, i) => { const ini = `${demAno}-${String(i + 1).padStart(2, '0')}-01`; return { ini, fim: addDays(addMonths(ini, 1), -1), nome: MES3[i] }; });
+  return [...ms, { ini: demAno + '-01-01', fim: demAno + '-12-31', nome: 'Ano', tot: true }];
+}
+/* Monta as linhas de cada demonstrativo: [rótulo, [valores], estilo] */
+function linhasDem() {
+  const L = listaEmp(demEmp), ps = periodosDem();
+  if (demAba === 'dre') {
+    const ds = ps.map(p => dreDe(L, p.ini, p.fim, demReg)); const A = ds[ds.length - 1];
+    const det = (k, sinal) => Object.keys(A[k]).sort((a, b) => Math.abs(A[k][b]) - Math.abs(A[k][a])).map(d => ['  ' + d, ds.map(x => x[k][d] || 0), 'item']);
+    return { cols: ps.map(p => p.nome), rows: [
+      ['Receita bruta', ds.map(x => x.rb), 'sub'], ...det('rec'),
+      ['(−) Impostos sobre a receita', ds.map(x => x.imp), 'item'],
+      ['Receita líquida', ds.map(x => x.rl), 'total'],
+      ['(−) Custo das obras', ds.map(x => x.cu), 'sub'], ...det('custo'),
+      ['Lucro bruto', ds.map(x => x.lb), 'total'],
+      ['Margem bruta', ds.map(x => x.rl ? x.lb / x.rl : null), 'pct'],
+      ['(−) Despesas', ds.map(x => x.de), 'sub'], ...det('desp'),
+      ['Resultado operacional', ds.map(x => x.ro), 'total'],
+      ['(+) Receitas financeiras', ds.map(x => x.fin), 'item'], ['(−) Juros e multas', ds.map(x => x.juros), 'item'],
+      ['Resultado do período', ds.map(x => x.res), 'grand'],
+      ['Margem líquida', ds.map(x => x.rl ? x.res / x.rl : null), 'pct']
+    ] };
+  }
+  if (demAba === 'dfc') {
+    const cs = contasEmp(demEmp); const ds = ps.map(p => dfcDe(L, cs, p.ini, p.fim));
+    return { cols: ps.map(p => p.nome), rows: [
+      ['Saldo inicial de caixa', ds.map(x => x.ini), 'sub'],
+      ['Atividades operacionais', ds.map(x => x.oper), 'total'],
+      ['  Recebimentos de vendas e receitas', ds.map(x => x.receb), 'item'], ['  Pagamentos de obra', ds.map(x => x.obra), 'item'],
+      ['  Despesas pagas', ds.map(x => x.desp), 'item'], ['  Impostos pagos', ds.map(x => x.imp), 'item'], ['  Rendimentos recebidos', ds.map(x => x.fin), 'item'],
+      ['Financiamento (aportes e retiradas)', ds.map(x => x.finc), 'total'],
+      ['  Aportes recebidos', ds.map(x => x.apIn), 'item'], ['  Aportes enviados / retiradas', ds.map(x => x.apOut), 'item'],
+      ['Variação do caixa', ds.map(x => x.vari), 'total'],
+      ['Saldo final de caixa', ds.map(x => x.fim), 'grand']
+    ] };
+  }
+  const fimP = ps[ps.length - 1].fim, iniP = addDays(ps[0].ini, -1);
+  const bs = [balancoDe(L, demEmp, iniP), balancoDe(L, demEmp, fimP)];
+  const linha = (n, f, s) => [n, bs.map(f), s];
+  return { cols: [dBR(iniP), dBR(fimP)], rows: [
+    linha('ATIVO', b => b.ativo, 'grand'),
+    linha('  Caixa e bancos', b => b.dispon, 'item'),
+    linha('  Contas a receber (até 12 meses)', b => b.recCP, 'item'),
+    linha('  Contas a receber (após 12 meses)', b => b.recLP, 'item'),
+    ...(demEmp ? [linha('  Créditos com empresas do grupo', b => Math.max(0, b.inter), 'item')] : []),
+    linha('PASSIVO', b => b.passivo, 'grand'),
+    linha('  Contas a pagar (até 12 meses)', b => b.pagCP, 'item'),
+    linha('  Contas a pagar (após 12 meses)', b => b.pagLP, 'item'),
+    ...(demEmp ? [linha('  Débitos com empresas do grupo', b => Math.max(0, -b.inter), 'item')] : []),
+    linha('PATRIMÔNIO LÍQUIDO', b => b.pl, 'grand'),
+    linha('  Capital inicial (saldo inicial das contas)', b => b.capital, 'item'),
+    linha('  Aportes', b => b.aportes, 'item'),
+    linha('  Resultado acumulado realizado', b => b.resReal, 'item'),
+    linha('  Resultado a realizar (a receber − a pagar)', b => b.resAReal, 'item'),
+    linha('Passivo + patrimônio líquido', b => b.passivo + b.pl, 'total')
+  ] };
+}
+const fmtDem = (v, s) => v === null || v === undefined ? '—' : s === 'pct' ? fPct.format(v) : Math.abs(v) < 0.5 ? '–' : brl(v);
+VIEWS.demonstrativos = {
+  titulo: 'DRE, DFC e Balanço',
+  refresh(el) {
+    const h = hoje(); if (!demAno) demAno = h.slice(0, 4); if (demEmp && !empPorId(demEmp)) demEmp = '';
+    const anos = [...new Set([h.slice(0, 4), ...S.list.map(t => (dataRef(t) || '').slice(0, 4)).filter(a => /^\d{4}$/.test(a))])].sort().reverse();
+    const { cols, rows } = linhasDem();
+    el.innerHTML = `<div class="filtros card">
+      ${variasEmpresas() ? `<label class="tgl">Empresa <select id="dE">${opts(empOpts(), demEmp, 'Grupo consolidado')}</select></label>` : ''}
+      <label class="tgl">Ano <select id="dA">${opts(anos, demAno)}</select></label>
+      <label class="tgl">Mês <select id="dM">${opts(MESES.map((m, i) => [String(i + 1).padStart(2, '0'), m]), demMes, 'Ano inteiro, mês a mês')}</select></label>
+      ${demAba === 'dre' ? `<label class="tgl">Regime <select id="dR">${opts([['caixa', 'Caixa (pelo pagamento)'], ['comp', 'Competência (pelo vencimento)']], demReg)}</select></label>` : ''}
+      <button class="btn primary" id="dPdf">Baixar PDF</button></div>
+      <div class="seg">${[['dre', 'DRE'], ['dfc', 'Fluxo de caixa (DFC)'], ['bal', 'Balanço patrimonial']].map(([v, l]) => `<button class="${v === demAba ? 'on' : ''}" data-act="demAba" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="card"><h2>${demAba === 'dre' ? 'Demonstração do resultado' : demAba === 'dfc' ? 'Demonstração do fluxo de caixa (método direto)' : 'Balanço patrimonial'} <span class="muted small">${esc(nomeEmpPDF(demEmp))}</span></h2>
+      <div class="tbl-wrap"><table class="tbl dem"><thead><tr><th class="l"></th>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>
+      ${rows.map(([n, vs, s]) => `<tr class="dem-${s}"><td class="l">${esc(n.trim())}</td>${vs.map((v, i) => `<td class="${s === 'pct' || Math.abs(v || 0) < 0.5 ? 'muted' : cls(v || 0)}${i === vs.length - 1 && vs.length > 2 ? ' dem-tot' : ''}">${fmtDem(v, s)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="muted small">${notaDem()}</p></div>`;
+    const on = (id, fn) => { const x = $('#' + id, el); if (x) x.onchange = e => { fn(e.target.value); this.refresh(el); }; };
+    on('dE', v => demEmp = v); on('dA', v => demAno = v); on('dM', v => demMes = v); on('dR', v => demReg = v);
+    $('#dPdf', el).onclick = () => pdfDemonstrativos().catch(e => { console.error(e); toast('Erro ao gerar PDF: ' + e.message, 'err'); });
+  }
+};
+ACOES.demAba = d => { demAba = d.v; refreshView(); };
+function notaDem() {
+  const base = 'Demonstrativos gerenciais montados a partir dos lançamentos do app; não substituem os da contabilidade.';
+  if (demAba === 'dre') return base + (demReg === 'caixa' ? ' Regime de caixa: entra o que foi pago ou recebido no período.' : ' Regime de competência: entra o que vence no período, pago ou não.') + ' Custos de obra são lançados como custo quando ocorrem (não há estoque de imóveis). Aportes ficam fora.';
+  if (demAba === 'dfc') return base + (demEmp ? ' O caixa da empresa considera todos os lançamentos do CNPJ, mesmo os pagos por conta de outra empresa do grupo.' : '');
+  return base + ' Contas a pagar e a receber incluem todas as parcelas em aberto na data.' + (demEmp ? ' Créditos e débitos com empresas do grupo aparecem quando um CNPJ pagou ou recebeu por conta bancária de outro.' : '');
+}
+async function pdfDemonstrativos() {
+  toast('Gerando PDF…');
+  const abaAtual = demAba; const ps = periodosDem(); const largo = ps.length > 2;
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: largo ? 'landscape' : 'portrait' }); const W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight();
+  const NAVY = [11, 32, 70]; const P = s => String(s).replace(/−/g, '-').replace(/[  ]/g, ' ');
+  try { const lg = await imgParaPNG(LOGO_COMPLETO, 480); pdf.addImage(lg.data, 'PNG', 36, 16, 96, 96 * lg.r); } catch (e) { /* sem logo */ }
+  pdf.setDrawColor(...NAVY); pdf.setLineWidth(1.2); pdf.line(36, 92, W - 36, 92);
+  pdf.setTextColor(...NAVY); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(16); pdf.text('Demonstrativos financeiros', W - 36, 38, { align: 'right' });
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10.5); pdf.text(P(nomeEmpPDF(demEmp)), W - 36, 56, { align: 'right' });
+  pdf.setFontSize(8.5); pdf.setTextColor(91, 107, 130); pdf.text(P(`${demMes ? MESES[+demMes - 1] + ' de ' + demAno : 'Ano de ' + demAno} · DRE em regime de ${demReg === 'caixa' ? 'caixa' : 'competência'} · gerado em ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`), W - 36, 72, { align: 'right' });
+  let y = 112;
+  for (const [aba, tit] of [['dre', 'Demonstração do resultado (DRE)'], ['dfc', 'Demonstração do fluxo de caixa (DFC)'], ['bal', 'Balanço patrimonial']]) {
+    demAba = aba; const { cols, rows } = linhasDem();
+    if (y > H - 160) { pdf.addPage(); y = 50; }
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(...NAVY); pdf.text(tit, 36, y); y += 8;
+    autoTable(pdf, { startY: y, head: [['', ...cols]], body: rows.map(([n, vs, s]) => [P(n), ...vs.map(v => P(fmtDem(v, s)))]), margin: { left: 36, right: 36 },
+      styles: { fontSize: largo ? 7 : 8.5, cellPadding: largo ? 2.5 : 4, textColor: [15, 27, 45] }, headStyles: { fillColor: NAVY, textColor: 255, fontStyle: 'bold' },
+      columnStyles: { 0: { cellWidth: largo ? 150 : 250 } },
+      didParseCell: dd => { if (dd.column.index > 0) dd.cell.styles.halign = 'right'; if (dd.section === 'body') { const s = rows[dd.row.index][2]; if (s === 'total' || s === 'grand') { dd.cell.styles.fontStyle = 'bold'; dd.cell.styles.fillColor = s === 'grand' ? [226, 231, 240] : [243, 245, 249]; } if (s === 'pct') dd.cell.styles.textColor = [91, 107, 130]; } } });
+    y = pdf.lastAutoTable.finalY + 10; pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(91, 107, 130);
+    const nt = pdf.splitTextToSize(P(notaDem()), W - 72); pdf.text(nt, 36, y + 6); y += nt.length * 9 + 22;
+  }
+  demAba = abaAtual;
+  const np = pdf.getNumberOfPages(); for (let i = 1; i <= np; i++) { pdf.setPage(i); pdf.setFontSize(8); pdf.setTextColor(140); pdf.text(`${i} / ${np}`, W - 36, H - 20, { align: 'right' }); }
+  await baixarArquivo(pdf.output('blob'), `SFG Demonstrativos ${demAno}${demMes ? '-' + demMes : ''}${demEmp ? ' ' + (empPorId(demEmp)?.nome || '') : ''}.pdf`);
+}
+
+/* ---------- Histórico ---------- */
+const ACAO_NOME = { criou: 'criou', alterou: 'alterou', baixa: 'deu baixa', estorno: 'estornou a baixa', restaurou: 'restaurou da lixeira', excluiu: 'excluiu', recorrente: 'gerou (conta recorrente)' };
+const quem = e => esc((e || '').split('@')[0] || 'alguém');
+const quando = ms => new Date(ms).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+function valHist(k, v) {
+  if (v === '' || v === null || v === undefined) return '—';
+  if (k === 'valor' || k === 'juros') return brl2(+v || 0);
+  if (k === 'venc' || k === 'pag') return dBR(v);
+  if (k === 'emp') return empPorId(v)?.nome || 'outro CNPJ';
+  if (k === 'status') return v === 'pago' ? 'pago' : 'em aberto';
+  return String(v);
+}
+function histTxt(h) {
+  const m = h.m ? Object.entries(h.m).map(([k, [a, b]]) => k === 'anexos' ? `anexos ${a} → ${b}` : `${(CAMPOS_HIST.find(x => x[0] === k) || [k, k])[1].toLowerCase()}: ${esc(valHist(k, a))} → ${esc(valHist(k, b))}`).join('; ') : '';
+  return `<span class="muted small">${quando(h.em)}</span> <b>${quem(h.por)}</b> ${ACAO_NOME[h.a] || h.a}${m ? ' · ' + m : ''}`;
+}
+VIEWS.historico = {
+  titulo: 'Histórico e lixeira',
+  refresh(el) {
+    const ev = [];
+    for (const t of S.list) for (const h of (t.hist || [])) ev.push({ ...h, t });
+    const lx = Object.entries((S.lixeira && S.lixeira.items) || {}).map(([id, v]) => { try { const o = JSON.parse(v); return { id, ...o }; } catch (e) { return null; } }).filter(Boolean).sort((a, b) => b.em - a.em);
+    for (const x of lx) ev.push({ em: x.em, por: x.por, a: 'excluiu', t: x.t, morto: true });
+    ev.sort((a, b) => b.em - a.em);
+    const users = [...new Set(ev.map(e => e.por).filter(Boolean))];
+    if (histU && !users.includes(histU)) histU = '';
+    const vis = ev.filter(e => !histU || e.por === histU).slice(0, 300);
+    el.innerHTML = `<div class="filtros card"><label class="tgl">Usuário <select id="hU">${opts(users.map(u => [u, u]), histU, 'Todos')}</select></label><span class="muted small">Cada lançamento guarda as últimas 25 mudanças: quem fez, quando e o que mudou. O que é excluído fica 90 dias na lixeira.</span></div>
+      <div class="grid lg"><div class="card"><h2>Atividade recente</h2><div class="tlist">${vis.map(e => `<div class="tr hist-row ${e.morto ? '' : 'click'}" ${e.morto ? '' : `data-act="abrir" data-id="${esc(e.t.id)}"`}><div class="td-main"><div class="td-item">${esc(e.t.item)}</div><div class="td-meta">${histTxt(e)}</div></div><div class="td-val"><b class="${cls(e.t.valor)}">${brl2(e.t.valor)}</b></div></div>`).join('') || '<p class="muted pad">Nenhuma alteração registrada ainda. O histórico começa a ser gravado a partir de agora.</p>'}</div></div>
+      <div class="card"><h2>Lixeira <span class="muted small">${lx.length} item(ns)</span>${lx.length ? '<button class="btn sm danger ghost rw" data-act="lxVazia">Esvaziar</button>' : ''}</h2><div class="tlist">${lx.slice(0, 200).map(x => `<div class="tr"><div class="td-main"><div class="td-item">${esc(x.t.item)}</div><div class="td-meta"><span>${dBR(x.t.venc)}</span><span>excluído por ${quem(x.por)} em ${quando(x.em)}</span></div></div><div class="td-val"><b class="${cls(x.t.valor)}">${brl2(x.t.valor)}</b><button class="btn sm rw" data-act="lxRest" data-id="${esc(x.id)}">Restaurar</button></div></div>`).join('') || '<p class="muted pad">A lixeira está vazia.</p>'}</div></div></div>`;
+    $('#hU', el).onchange = e => { histU = e.target.value; this.refresh(el); };
+  }
+};
+let histU = '';
+ACOES.lxRest = d => { const v = S.lixeira?.items?.[d.id]; if (!v) return; const o = JSON.parse(v); if (S.byId.has(d.id)) { toast('Esse lançamento já existe.', 'err'); return; } salvarTitulos([o.t], { acao: 'restaurou' }); gravar(doc(db, 'config', 'lixeira'), { items: { [d.id]: deleteField() } }, { merge: true }).catch(onErroEscrita); toast('Lançamento restaurado'); };
+ACOES.lxVazia = async () => { const ks = Object.keys(S.lixeira?.items || {}); if (ks.length && await confirmar(`Apagar definitivamente os <b>${ks.length}</b> itens da lixeira?`, 'Apagar')) { gravar(doc(db, 'config', 'lixeira'), { items: {} }).catch(onErroEscrita); toast('Lixeira esvaziada'); } };
+
 VIEWS.usuarios = {
   titulo: 'Usuários e acesso',
   refresh(el) {
@@ -1838,6 +2447,7 @@ VIEWS.dados = {
       <div class="card"><h2>Importar</h2><p class="muted">Importa a planilha <b>SFG Projeto</b> (abas Extrato, Contas a Pagar, Contas a Receber, Previsto e Checklist) ou um backup .json. <b>Substitui todos os dados atuais.</b> Precisa de internet.</p>
         <div class="acts left"><label class="btn file">Importar planilha .xlsx<input type="file" id="iXls" accept=".xlsx,.xlsm" hidden></label><label class="btn file">Restaurar backup .json<input type="file" id="iJson" accept=".json,application/json" hidden></label></div><p id="impStatus" class="muted"></p></div>
       ${cardDrive()}
+      ${cardAgenda()}
       <div class="card"><h2>Conta</h2><div class="kv"><span>Usuário</span><b>${esc(S.user?.email || '')}</b></div><div class="kv"><span>Lançamentos</span><b>${S.list.length.toLocaleString('pt-BR')}</b></div><div class="kv"><span>Versão</span><b>${VERSAO}</b></div><div class="acts left"><button class="btn danger ghost" id="bSair">Sair deste aparelho</button></div></div>
     </div>`;
     $('#bXls', el).onclick = exportarExcel; $('#bJson', el).onclick = exportarJSON;
@@ -1853,7 +2463,7 @@ async function baixarArquivo(blob, nome) {
 }
 function exportarExcel() {
   const cab = ['Item', 'R$', 'Juros e Multa', 'NF', 'Local', 'Quadra', 'Lote', 'Destino', 'Data', 'Vencimento', 'Conta', 'Fornecedor', 'Observação', 'Quantidade', 'Unidade', 'Nº NF', 'Anexo (Drive)', 'Empresa', 'CNPJ', 'Conferência CNPJ'];
-  const lin = t => [t.item, t.valor, t.juros || 0, !!t.nf, t.local || E().local, t.quadra, isNaN(+t.lote) || t.lote === '' ? t.lote : +t.lote, t.destino, pago(t) ? (t.pag || t.venc) : t.venc, t.venc, t.conta || '', t.forn || '', t.obs || '', t.qtd || '', t.unid || '', t.nfNum || '', t.anexoLink || '', empPorId(empT(t))?.nome || '', fCnpj(empPorId(empT(t))?.cnpj || ''), !variasEmpresas() ? '' : empDiverge(t) ? 'diferente da obra' : empDef(t) ? 'ok' : 'não definido'];
+  const lin = t => [t.item, t.valor, t.juros || 0, !!t.nf, t.local || E().local, t.quadra, isNaN(+t.lote) || t.lote === '' ? t.lote : +t.lote, t.destino, pago(t) ? (t.pag || t.venc) : t.venc, t.venc, t.conta || '', t.forn || '', t.obs || '', t.qtd || '', t.unid || '', t.nfNum || '', anexosDe(t).map(a => a.link).filter(Boolean).join(' '), empPorId(empT(t))?.nome || '', fCnpj(empPorId(empT(t))?.cnpj || ''), !variasEmpresas() ? '' : empDiverge(t) ? 'diferente da obra' : empDef(t) ? 'ok' : 'não definido'];
   const toDate = r => { for (const i of [8, 9]) if (r[i]) { const [y, m, d] = r[i].split('-').map(Number); r[i] = new Date(Date.UTC(y, m - 1, d)); } return r; };
   const sheet = rows => { const ws = XLSX.utils.aoa_to_sheet([cab, ...rows.map(lin).map(toDate)], { cellDates: true }); ws['!cols'] = [{ wch: 44 }, { wch: 14 }, { wch: 12 }, { wch: 5 }, { wch: 14 }, { wch: 7 }, { wch: 6 }, { wch: 16 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 20 }, { wch: 24 }]; return ws; };
   const wb = XLSX.utils.book_new();

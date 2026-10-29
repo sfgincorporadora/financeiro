@@ -11,11 +11,13 @@
   "license": "ISC",
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
+    "@zxing/library": "^0.21.3",
     "chart.js": "^4.6.1",
     "esbuild": "^0.24.2",
     "firebase": "^11.10.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
+    "pdfjs-dist": "^4.10.38",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

@@ -5,6 +5,8 @@ const fake = { name: 'fake', setup(b) { b.onResolve({ filter: /^firebase\/(app|a
 await build({ entryPoints: ['src/main.js'], bundle: true, format: 'iife', outfile: 'test/www/app.js', plugins: [fake], logLevel: 'warning' });
 writeFileSync('test/www/app.js', readFileSync('test/www/app.js', 'utf8').replaceAll('__VERSAO__', 'teste'));
 writeFileSync('test/www/index.html', readFileSync('src/index.html', 'utf8').replaceAll('__VERSAO__', 'teste'));
+await build({ entryPoints: ['src/leitor.js'], bundle: true, format: 'iife', outfile: 'test/www/leitor.js', logLevel: 'warning' });
+cpSync('node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'test/www/pdf.worker.min.mjs');
 cpSync('src/icons', 'test/www/icons', { recursive: true });
 cpSync('src/fonts', 'test/www/fonts', { recursive: true });
 console.log('ok');
