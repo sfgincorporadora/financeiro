@@ -348,7 +348,7 @@ const IC = {
 const ic = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 
 const NAV = [
-  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['demonstrativos', 'DRE, DFC e Balanço'], ['relatorios', 'Relatório mensal'],
+  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['demonstrativos', 'DRE, DFC e BP'], ['relatorios', 'Relatório mensal'],
   ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['cronograma', 'Cronograma'], ['vendas', 'Vendas e repasses'], ['checklist', 'Checklist'], ['simulador', 'Simulador'],
   ['#', 'Gestão'], ['empresas', 'Empresas (CNPJ)'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['historico', 'Histórico e lixeira'], ['dados', 'Dados e backup']
 ];
@@ -2206,7 +2206,8 @@ ACOES.recEd = d => {
 };
 
 /* ---------- Demonstrativos: DRE, DFC e Balanço (gerenciais) ---------- */
-let demEmp = '', demAno = '', demMes = '', demReg = 'caixa', demAba = 'dre';
+let demEmp = '', demAno = '', demMes = '', demVis = 'mensal', demReg = 'caixa', demAba = 'dre';
+const VISOES = [['mensal', 'Mensal'], ['trimestral', 'Trimestral'], ['semestral', 'Semestral'], ['anual', 'Anual (comparar anos)'], ['mes', 'Um mês']];
 const FIN_REC = ['Rendimento'];
 const valDem = t => (t.valor || 0);
 function dreDe(L, ini, fim, regime) {
@@ -2248,7 +2249,8 @@ function balancoDe(L, emp, D) {
   const realL = L.filter(t => pago(t) && dt(t) <= D);
   const caixaTeo = ini + sum(realL, v);
   const dispon = emp ? ini + sum(S.list.filter(t => pago(t) && dt(t) <= D && nomes.has(t.conta || '')), v) : caixaTeo;
-  const ab = L.filter(t => !pago(t) || dt(t) > D);
+  const existia = t => t.venc <= D || (t.criado && isoLocal(new Date(t.criado)) <= D);
+  const ab = L.filter(t => (!pago(t) || dt(t) > D) && existia(t));
   const lim = addDays(D, 365); const ap = t => secaoDe(t.destino) === 'aporte';
   const o = {
     dispon, inter: caixaTeo - dispon,
@@ -2261,7 +2263,12 @@ function balancoDe(L, emp, D) {
   return o;
 }
 function periodosDem() {
-  if (demMes) { const ini = `${demAno}-${demMes}-01`; return [{ ini, fim: addDays(addMonths(ini, 1), -1), nome: MES3[+demMes - 1] + '/' + demAno.slice(2) }]; }
+  const bloco = (n, nome) => [...Array(12 / n)].map((_, i) => { const ini = `${demAno}-${String(i * n + 1).padStart(2, '0')}-01`; return { ini, fim: addDays(addMonths(ini, n), -1), nome: nome(i) }; });
+  const ano = { ini: demAno + '-01-01', fim: demAno + '-12-31', nome: 'Ano', tot: true };
+  if (demVis === 'trimestral') return [...bloco(3, i => (i + 1) + 'º tri'), ano];
+  if (demVis === 'semestral') return [...bloco(6, i => (i + 1) + 'º sem'), ano];
+  if (demVis === 'anual') return [...Array(4)].map((_, i) => String(+demAno - 3 + i)).map(a => ({ ini: a + '-01-01', fim: a + '-12-31', nome: a }));
+  if (demVis === 'mes') { if (!demMes) demMes = hoje().slice(5, 7); const ini = `${demAno}-${demMes}-01`; return [{ ini, fim: addDays(addMonths(ini, 1), -1), nome: MES3[+demMes - 1] + '/' + demAno.slice(2) }]; }
   const ms = [...Array(12)].map((_, i) => { const ini = `${demAno}-${String(i + 1).padStart(2, '0')}-01`; return { ini, fim: addDays(addMonths(ini, 1), -1), nome: MES3[i] }; });
   return [...ms, { ini: demAno + '-01-01', fim: demAno + '-12-31', nome: 'Ano', tot: true }];
 }
@@ -2298,10 +2305,11 @@ function linhasDem() {
       ['Saldo final de caixa', ds.map(x => x.fim), 'grand']
     ] };
   }
-  const fimP = ps[ps.length - 1].fim, iniP = addDays(ps[0].ini, -1);
-  const bs = [balancoDe(L, demEmp, iniP), balancoDe(L, demEmp, fimP)];
+  const pp = ps.filter(p => !p.tot);
+  const datas = pp.length === 1 ? [addDays(pp[0].ini, -1), pp[0].fim] : pp.map(p => p.fim);
+  const bs = datas.map(d => balancoDe(L, demEmp, d));
   const linha = (n, f, s) => [n, bs.map(f), s];
-  return { cols: [dBR(iniP), dBR(fimP)], rows: [
+  return { cols: datas.map(d => pp.length === 1 ? dBR(d) : demVis === 'anual' ? d.slice(0, 4) : dBR(d).slice(0, 5)), rows: [
     linha('ATIVO', b => b.ativo, 'grand'),
     linha('  Caixa e bancos', b => b.dispon, 'item'),
     linha('  Contas a receber (até 12 meses)', b => b.recCP, 'item'),
@@ -2321,7 +2329,7 @@ function linhasDem() {
 }
 const fmtDem = (v, s) => v === null || v === undefined ? '—' : s === 'pct' ? fPct.format(v) : Math.abs(v) < 0.5 ? '–' : brl(v);
 VIEWS.demonstrativos = {
-  titulo: 'DRE, DFC e Balanço',
+  titulo: 'DRE, DFC e BP',
   refresh(el) {
     const h = hoje(); if (!demAno) demAno = h.slice(0, 4); if (demEmp && !empPorId(demEmp)) demEmp = '';
     const anos = [...new Set([h.slice(0, 4), ...S.list.map(t => (dataRef(t) || '').slice(0, 4)).filter(a => /^\d{4}$/.test(a))])].sort().reverse();
@@ -2329,16 +2337,17 @@ VIEWS.demonstrativos = {
     el.innerHTML = `<div class="filtros card">
       ${variasEmpresas() ? `<label class="tgl">Empresa <select id="dE">${opts(empOpts(), demEmp, 'Grupo consolidado')}</select></label>` : ''}
       <label class="tgl">Ano <select id="dA">${opts(anos, demAno)}</select></label>
-      <label class="tgl">Mês <select id="dM">${opts(MESES.map((m, i) => [String(i + 1).padStart(2, '0'), m]), demMes, 'Ano inteiro, mês a mês')}</select></label>
+      <label class="tgl">Visão <select id="dV">${opts(VISOES, demVis)}</select></label>
+      ${demVis === 'mes' ? `<label class="tgl">Mês <select id="dM">${opts(MESES.map((m, i) => [String(i + 1).padStart(2, '0'), m]), demMes || hoje().slice(5, 7))}</select></label>` : ''}
       ${demAba === 'dre' ? `<label class="tgl">Regime <select id="dR">${opts([['caixa', 'Caixa (pelo pagamento)'], ['comp', 'Competência (pelo vencimento)']], demReg)}</select></label>` : ''}
       <button class="btn primary" id="dPdf">Baixar PDF</button></div>
-      <div class="seg">${[['dre', 'DRE'], ['dfc', 'Fluxo de caixa (DFC)'], ['bal', 'Balanço patrimonial']].map(([v, l]) => `<button class="${v === demAba ? 'on' : ''}" data-act="demAba" data-v="${v}">${l}</button>`).join('')}</div>
-      <div class="card"><h2>${demAba === 'dre' ? 'Demonstração do resultado' : demAba === 'dfc' ? 'Demonstração do fluxo de caixa (método direto)' : 'Balanço patrimonial'} <span class="muted small">${esc(nomeEmpPDF(demEmp))}</span></h2>
+      <div class="seg">${[['dre', 'DRE'], ['dfc', 'Fluxo de caixa (DFC)'], ['bal', 'BP']].map(([v, l]) => `<button class="${v === demAba ? 'on' : ''}" data-act="demAba" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="card"><h2>${demAba === 'dre' ? 'Demonstração do resultado' : demAba === 'dfc' ? 'Demonstração do fluxo de caixa (método direto)' : 'Balanço patrimonial (BP)'} <span class="muted small">${esc(nomeEmpPDF(demEmp))}</span></h2>
       <div class="tbl-wrap"><table class="tbl dem"><thead><tr><th class="l"></th>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>
       ${rows.map(([n, vs, s]) => `<tr class="dem-${s}"><td class="l">${esc(n.trim())}</td>${vs.map((v, i) => `<td class="${s === 'pct' || Math.abs(v || 0) < 0.5 ? 'muted' : cls(v || 0)}${i === vs.length - 1 && vs.length > 2 ? ' dem-tot' : ''}">${fmtDem(v, s)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
       <p class="muted small">${notaDem()}</p></div>`;
     const on = (id, fn) => { const x = $('#' + id, el); if (x) x.onchange = e => { fn(e.target.value); this.refresh(el); }; };
-    on('dE', v => demEmp = v); on('dA', v => demAno = v); on('dM', v => demMes = v); on('dR', v => demReg = v);
+    on('dE', v => demEmp = v); on('dA', v => demAno = v); on('dM', v => demMes = v); on('dV', v => demVis = v); on('dR', v => demReg = v);
     $('#dPdf', el).onclick = () => pdfDemonstrativos().catch(e => { console.error(e); toast('Erro ao gerar PDF: ' + e.message, 'err'); });
   }
 };
@@ -2347,7 +2356,7 @@ function notaDem() {
   const base = 'Demonstrativos gerenciais montados a partir dos lançamentos do app; não substituem os da contabilidade.';
   if (demAba === 'dre') return base + (demReg === 'caixa' ? ' Regime de caixa: entra o que foi pago ou recebido no período.' : ' Regime de competência: entra o que vence no período, pago ou não.') + ' Custos de obra são lançados como custo quando ocorrem (não há estoque de imóveis). Aportes ficam fora.';
   if (demAba === 'dfc') return base + (demEmp ? ' O caixa da empresa considera todos os lançamentos do CNPJ, mesmo os pagos por conta de outra empresa do grupo.' : '');
-  return base + ' Contas a pagar e a receber incluem todas as parcelas em aberto na data.' + (demEmp ? ' Créditos e débitos com empresas do grupo aparecem quando um CNPJ pagou ou recebeu por conta bancária de outro.' : '');
+  return base + ' Contas a pagar e a receber incluem as parcelas em aberto na data que já tinham sido lançadas ou vencidas até ela.' + (demEmp ? ' Créditos e débitos com empresas do grupo aparecem quando um CNPJ pagou ou recebeu por conta bancária de outro.' : '');
 }
 async function pdfDemonstrativos() {
   toast('Gerando PDF…');
@@ -2358,9 +2367,9 @@ async function pdfDemonstrativos() {
   pdf.setDrawColor(...NAVY); pdf.setLineWidth(1.2); pdf.line(36, 92, W - 36, 92);
   pdf.setTextColor(...NAVY); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(16); pdf.text('Demonstrativos financeiros', W - 36, 38, { align: 'right' });
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10.5); pdf.text(P(nomeEmpPDF(demEmp)), W - 36, 56, { align: 'right' });
-  pdf.setFontSize(8.5); pdf.setTextColor(91, 107, 130); pdf.text(P(`${demMes ? MESES[+demMes - 1] + ' de ' + demAno : 'Ano de ' + demAno} · DRE em regime de ${demReg === 'caixa' ? 'caixa' : 'competência'} · gerado em ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`), W - 36, 72, { align: 'right' });
+  pdf.setFontSize(8.5); pdf.setTextColor(91, 107, 130); pdf.text(P(`${demVis === 'mes' ? MESES[+demMes - 1] + ' de ' + demAno : demVis === 'anual' ? `${+demAno - 3} a ${demAno}` : `${demAno}, visão ${VISOES.find(x => x[0] === demVis)[1].toLowerCase()}`} · DRE em regime de ${demReg === 'caixa' ? 'caixa' : 'competência'} · gerado em ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`), W - 36, 72, { align: 'right' });
   let y = 112;
-  for (const [aba, tit] of [['dre', 'Demonstração do resultado (DRE)'], ['dfc', 'Demonstração do fluxo de caixa (DFC)'], ['bal', 'Balanço patrimonial']]) {
+  for (const [aba, tit] of [['dre', 'Demonstração do resultado (DRE)'], ['dfc', 'Demonstração do fluxo de caixa (DFC)'], ['bal', 'Balanço patrimonial (BP)']]) {
     demAba = aba; const { cols, rows } = linhasDem();
     if (y > H - 160) { pdf.addPage(); y = 50; }
     pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(...NAVY); pdf.text(tit, 36, y); y += 8;
@@ -2373,7 +2382,7 @@ async function pdfDemonstrativos() {
   }
   demAba = abaAtual;
   const np = pdf.getNumberOfPages(); for (let i = 1; i <= np; i++) { pdf.setPage(i); pdf.setFontSize(8); pdf.setTextColor(140); pdf.text(`${i} / ${np}`, W - 36, H - 20, { align: 'right' }); }
-  await baixarArquivo(pdf.output('blob'), `SFG Demonstrativos ${demAno}${demMes ? '-' + demMes : ''}${demEmp ? ' ' + (empPorId(demEmp)?.nome || '') : ''}.pdf`);
+  await baixarArquivo(pdf.output('blob'), `SFG Demonstrativos ${demAno}${demVis === 'mes' ? '-' + demMes : ' ' + demVis}${demEmp ? ' ' + (empPorId(demEmp)?.nome || '') : ''}.pdf`);
 }
 
 /* ---------- Histórico ---------- */
