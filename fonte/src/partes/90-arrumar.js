@@ -4,7 +4,7 @@
    ========================================================= */
 const chaveGrupo = t => normTxt(baseItem(t)).replace(/\(\d+\/\d+\)/g, '').replace(/\b\d+[a-z]?\b/g, ' ').replace(/\s+/g, ' ').trim() || '(sem descrição)';
 const TIPOS_ARRUMAR = [['forn', 'Sem fornecedor'], ['etapa', 'Sem etapa da obra'], ['cnpj', 'Sem CNPJ'], ['anexo', 'Pagos sem nota ou anexo']];
-let arrTipo = 'forn';
+let arrTipo = 'empresa';
 function candidatosArrumar(tipo) {
   if (tipo === 'forn') return S.list.filter(t => t.valor < 0 && !t.forn);
   if (tipo === 'etapa') return S.list.filter(t => t.valor < 0 && !t.etapaObra && secaoDe(t.destino) === 'op' && t.quadra && t.quadra !== '-');
@@ -20,16 +20,15 @@ function sugestao(tipo, chave, ts) {
   if (tipo === 'forn') { const nomes = [...new Set([...S.list.map(t => t.forn).filter(Boolean), ...Object.keys((S.fornecedores && S.fornecedores.lista) || {})])].sort((a, b) => b.length - a.length); const ck = ' ' + chave + ' '; for (const n of nomes) { const k = normTxt(n); if (k.length > 3 && ck.includes(' ' + k + ' ')) return n; const p = k.split(' ')[0]; if (p.length > 4 && ck.includes(' ' + p + ' ')) return n; } }
   return '';
 }
-VIEWS.arrumar = {
-  titulo: 'Arrumar lançamentos',
-  refresh(el) {
+const VIEWS_ARRUMAR_ANTIGO = {
+  refresh(el, abas) {
     const tipos = TIPOS_ARRUMAR.filter(([k]) => k !== 'cnpj' || variasEmpresas());
     const cont = Object.fromEntries(tipos.map(([k]) => [k, candidatosArrumar(k).length]));
     const ts = candidatosArrumar(arrTipo);
     const gs = {}; for (const t of ts) (gs[chaveGrupo(t)] = gs[chaveGrupo(t)] || []).push(t);
     const lista = Object.entries(gs).map(([k, xs]) => ({ k, xs, n: xs.length, tot: sum(xs, t => t.valor), ex: xs[0], sug: sugestao(arrTipo, k, xs) })).sort((a, b) => b.n - a.n || a.tot - b.tot).slice(0, 150);
     const opcoes = arrTipo === 'forn' ? [...new Set([...S.list.map(t => t.forn).filter(Boolean), ...Object.keys((S.fornecedores && S.fornecedores.lista) || {})])].sort() : arrTipo === 'etapa' ? etapasOrc() : [];
-    el.innerHTML = `<div class="seg">${tipos.map(([k, n]) => `<button class="${k === arrTipo ? 'on' : ''}" data-act="arrTipo" data-v="${k}">${n} (${cont[k].toLocaleString('pt-BR')})</button>`).join('')}</div>
+    el.innerHTML = `${abas}
       <div class="card"><h2>${esc(TIPOS_ARRUMAR.find(x => x[0] === arrTipo)[1])} <span class="muted small">${ts.length.toLocaleString('pt-BR')} lançamento(s) em ${Object.keys(gs).length} grupo(s) parecido(s)</span>${arrTipo !== 'anexo' && lista.some(g => g.sug) ? '<button class="btn sm primary rw" id="aTodas">Aplicar todas as sugestões</button>' : ''}</h2>
       <p class="muted small">${arrTipo === 'anexo' ? 'Pagamentos dos últimos 4 meses sem número de NF e sem anexo. Abra para anexar a nota ou o comprovante.' : 'Lançamentos com descrição parecida ficam juntos. Confira a sugestão (ou escolha outra) e aplique ao grupo inteiro.'}</p>
       ${opcoes.length ? `<datalist id="dlArr">${opcoes.map(o => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}
@@ -66,10 +65,13 @@ function listaAlertas() {
   if (S.contratos) { const c = S.contratos.filter(c => c.status !== 'encerrado').map(c => [c, resumoContrato(c)]).filter(([, r]) => r.fisico !== null && r.pct !== null && r.pct * 100 > r.fisico + 10); if (c.length) add('medio', `${c.length} contrato(s) com mais pago do que o avanço físico medido`, '#/contratos'); }
   if (variasEmpresas()) { const d = S.list.filter(empDiverge).length; if (d) add('baixo', `${d} lançamento(s) com CNPJ diferente da obra`, '#/empresas'); }
   const semNota = candidatosArrumar('anexo').filter(t => t.criadoPor && (t.pag || t.venc) >= addDays(h, -45)).length;
+  const emLotes = typeof candidatosRevisar === 'function' ? gruposJuntar(candidatosRevisar('empresa')).length : 0;
+  if (emLotes) add('medio', `${emLotes} despesa(s) da empresa lançada(s) dividida(s) em lotes: revise e junte`, '#/arrumar', 'arrEmpresa');
   if (semNota) add('baixo', `${semNota} pagamento(s) lançado(s) no app nos últimos 45 dias sem nota fiscal ou anexo`, '#/arrumar', 'arrAnexo');
   return A;
 }
 ACOES.arrAnexo = () => { arrTipo = 'anexo'; location.hash = '#/arrumar'; };
+ACOES.arrEmpresa = () => { arrTipo = 'empresa'; location.hash = '#/arrumar'; };
 function painelAlertas() {
   const A = listaAlertas(); if (!A.length) return `<div class="alertas ok"><span class="dot-ok"></span> Tudo em dia: nenhuma pendência importante.</div>`;
   const ord = { alto: 0, medio: 1, baixo: 2 }; A.sort((a, b) => ord[a.nivel] - ord[b.nivel]);

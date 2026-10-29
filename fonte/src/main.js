@@ -140,7 +140,7 @@ const E = () => {
 const empPorId = id => E().empresas.find(x => x.id === id);
 const matrizId = () => (E().empresas.find(x => x.tipo === 'matriz') || E().empresas[0]).id;
 const empDaObra = o => { const id = E().obraEmpresa[o]; return id && empPorId(id) ? id : matrizId(); };
-const empT = t => t.emp && empPorId(t.emp) ? t.emp : empDaObra(obraT(t));
+const empT = t => t.emp && empPorId(t.emp) ? t.emp : t.ambito === 'empresa' ? matrizId() : empDaObra(obraT(t));
 const empConta = nome => { const c = E().contas.find(x => x.nome === nome); return c && c.emp && empPorId(c.emp) ? c.emp : matrizId(); };
 const variasEmpresas = () => E().empresas.length > 1;
 const empDef = t => !!(t.emp && empPorId(t.emp));
@@ -155,10 +155,11 @@ function cnpjValido(c) {
 const empRotulo = (x, curto) => x ? x.nome + (x.cnpj && !curto ? ' · ' + fCnpj(x.cnpj) : '') + (x.tipo === 'matriz' && curto ? ' (matriz)' : '') : '';
 const empOpts = () => E().empresas.map(x => [x.id, (x.tipo === 'matriz' ? 'Matriz · ' : 'Filial · ') + x.nome + (x.cnpj ? ' · ' + fCnpj(x.cnpj).slice(-8) : '')]);
 const obraDe = q => { const e = E(); const o = e.quadraObra[q]; return o && e.obras.includes(o) ? o : e.obras[0]; };
-const obraT = t => t.quadra && t.quadra !== '-' && E().quadras.includes(t.quadra) ? obraDe(t.quadra) : (t.local || E().obras[0]);
+const obraT = t => t.ambito === 'empresa' ? '' : t.quadra && t.quadra !== '-' && E().quadras.includes(t.quadra) ? obraDe(t.quadra) : (t.local || E().obras[0]);
+const ehEmpresa = t => t.ambito === 'empresa';
 const variasObras = () => E().obras.length > 1;
 const quadrasDaObra = o => E().quadras.filter(q => !o || obraDe(q) === o);
-function secaoDe(dest) { const d = E().destinos; for (const s of ['op', 'nonop', 'rec', 'aporte']) if ((d[s] || []).includes(dest)) return s; return dest === 'Aporte' ? 'aporte' : 'nonop'; }
+function secaoDe(dest) { const d = E().destinos; for (const s of ['op', 'nonop', 'rec', 'aporte']) if ((d[s] || []).includes(dest)) return s; return ['Aporte', 'Transferência'].includes(dest) ? 'aporte' : 'nonop'; }
 const todosDestinos = () => { const d = E().destinos; return [...(d.op || []), ...(d.nonop || []), ...(d.rec || []), ...(d.aporte || [])]; };
 const lotesDe = q => (E().lotes[q] || []).slice().sort(lotSort);
 const pago = t => t.status === 'pago';
@@ -181,7 +182,7 @@ function limpar(t) { const o = { ...t }; delete o.mes; return o; }
 function onErroEscrita(e) { console.error(e); toast(e.code === 'permission-denied' ? 'Sem permissão para salvar. Confira o usuário logado.' : 'Erro ao salvar: ' + (e.message || e), 'err'); }
 
 /* Grava vários títulos agrupando por mês (um documento por mês). Não aguarda o servidor: funciona offline. */
-const CAMPOS_HIST = [['item', 'Descrição'], ['valor', 'Valor'], ['venc', 'Vencimento'], ['status', 'Situação'], ['pag', 'Pago em'], ['conta', 'Conta'], ['juros', 'Juros/multa'], ['destino', 'Destino'], ['local', 'Obra'], ['quadra', 'Quadra'], ['lote', 'Lote'], ['emp', 'CNPJ'], ['forn', 'Fornecedor'], ['nfNum', 'NF'], ['obs', 'Observação'], ['etapaObra', 'Etapa da obra'], ['contrato', 'Contrato']];
+const CAMPOS_HIST = [['item', 'Descrição'], ['valor', 'Valor'], ['venc', 'Vencimento'], ['status', 'Situação'], ['pag', 'Pago em'], ['conta', 'Conta'], ['juros', 'Juros/multa'], ['destino', 'Destino'], ['local', 'Obra'], ['quadra', 'Quadra'], ['lote', 'Lote'], ['emp', 'CNPJ'], ['forn', 'Fornecedor'], ['nfNum', 'NF'], ['obs', 'Observação'], ['etapaObra', 'Etapa da obra'], ['contrato', 'Contrato'], ['ambito', 'Pertence a'], ['aporteTipo', 'Tipo de aporte']];
 const HIST_NO_LANC = 5;
 function registrarHist(t, ant, opt) {
   const em = Date.now(), por = S.user?.email || ''; const log = x => { (opt._log = opt._log || []).push({ ...x, t: t.id, item: t.item, valor: t.valor }); return x; };
@@ -424,7 +425,7 @@ const areaDe = nome => Object.keys(AREAS).find(a => AREAS[a][1].some(x => x[0] =
 const NAV = [
   ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['@relatorios'],
   ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['vendas', 'Vendas e repasses'], ['@suprimentos'], ['@planejamento'], ['@documentos'],
-  ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['empresas', 'Empresas (CNPJ)'], ['arrumar', 'Arrumar lançamentos'], ['cadastros', 'Cadastros'], ['@sistema']
+  ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['empresas', 'Empresas (CNPJ)'], ['arrumar', 'Revisar e classificar'], ['cadastros', 'Cadastros'], ['@sistema']
 ].map(([k, n]) => k[0] === '@' ? [AREAS[k.slice(1)][1][0][0], AREAS[k.slice(1)][0], k.slice(1)] : [k, n]);
 const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg', LOGO_COMPLETO = 'icons/logo-azul-incorporadora.svg';
 const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Receber'], ['obras', 'Obras'], ['mais', 'Mais']];
@@ -553,13 +554,20 @@ const optsDestino = sel => ['op', 'nonop', 'rec', 'aporte'].map(s => { const ds 
 const quadrasOpts = () => [['-', 'Geral / administrativo (-)'], ...E().quadras.map(q => [q, 'Quadra ' + q + (variasObras() ? ' · ' + obraDe(q) : '')])];
 const campoObra = (sel, empSel) => {
   const o = sel || E().obras[0]; const c = [];
-  if (variasObras()) c.push(`<label>Obra<select name="obra">${opts(E().obras, o)}</select></label>`);
+  if (variasObras()) c.push(`<label class="so-obra">Obra<select name="obra">${opts(E().obras, o)}</select></label>`);
   if (variasEmpresas()) c.push(`<label>CNPJ da nota / pagamento<select name="emp" required>${opts(empOpts(), empSel || '', 'Escolha o CNPJ…')}</select></label>`);
   return (c.length === 2 ? `<div class="g2">${c.join('')}</div>` : c.join('')) + (variasEmpresas() ? '<p class="hint-data" id="empHint"></p>' : '');
 };
-const obraDoForm = F => F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : E().obras[0]);
+const obraDoForm = F => F.ambito && F.ambito.value === 'empresa' ? '' : F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : E().obras[0]);
+const TIPOS_APORTE = [['capital', 'Capital do sócio (integralização)'], ['emprestimo', 'Empréstimo do sócio (a devolver)'], ['intragrupo', 'Entre empresas do grupo (matriz ↔ filial)'], ['retirada', 'Retirada / distribuição de lucro'], ['devolucao', 'Devolução de empréstimo ao sócio'], ['transferencia', 'Transferência entre contas da mesma empresa'], ['terceiro', 'Empréstimo / financiamento de terceiros']];
+const tipoAporteNome = k => (TIPOS_APORTE.find(x => x[0] === k) || [k, k])[1];
+const campoAporte = (sel, dest) => `<label id="rowAporte" class="${secaoDe(dest || '') === 'aporte' ? '' : 'hidden'}">Tipo de aporte<select name="aporteTipo">${opts(TIPOS_APORTE, sel || '', 'Escolha o tipo…')}</select></label>`;
+const sincAporte = F => { const r = F.querySelector('#rowAporte'); if (r) r.classList.toggle('hidden', secaoDe(F.destino.value) !== 'aporte'); };
+const campoAmbito = sel => `<label>A quem pertence<select name="ambito">${opts([['obra', 'Obra: quadra, lotes ou custo geral da obra'], ['empresa', 'Empresa: administrativo, fora das obras']], sel || 'obra')}</select></label>`;
+const modoAmbito = F => { if (!F.ambito) return; const em = F.ambito.value === 'empresa'; F.classList.toggle('modo-empresa', em); if (em) { F.quadra.value = '-'; if (F.lote) F.lote.value = '-'; } };
 const sincEmp = F => {
   const h = F.querySelector('#empHint'); if (!F.emp || !h) return;
+  if (F.ambito && F.ambito.value === 'empresa') { h.className = 'hint-data info'; h.textContent = F.emp.value ? '' : 'Despesa da empresa: escolha o CNPJ que pagou (normalmente a matriz).'; return; }
   const o = obraDoForm(F), eo = empDaObra(o), x = empPorId(eo);
   if (!F.emp.value) { h.className = 'hint-data info'; h.innerHTML = `A obra ${esc(o)} é da ${esc(x.nome)}. Confira na nota em qual CNPJ o gasto foi emitido. <button type="button" class="btn link sm" data-usaemp="${esc(eo)}">Usar ${esc(x.nome)}</button>`; const b = h.querySelector('[data-usaemp]'); b.onclick = () => { F.emp.value = eo; sincEmp(F); }; }
   else if (F.emp.value !== eo) { h.className = 'hint-data'; h.textContent = `Atenção: a obra ${o} é da ${x.nome}, e este lançamento está em ${empPorId(F.emp.value)?.nome}. Ele fica marcado como "CNPJ diferente da obra" para conferência.`; }
@@ -680,13 +688,15 @@ function formNovo(def = {}) {
     <label>Descrição<input name="item" required placeholder="Ex.: Mendonça NF, Parcela terreno, Venda" list="dlItens" value="${esc(def.item || '')}"></label>
     <div class="g2"><label>Fornecedor / cliente<input name="forn" list="dlForn" value="${esc(def.forn || '')}"></label>
       <label>Destino<select name="destino" required>${optsDestino(def.destino || (def.tipo === 'entrada' ? 'Venda' : 'Material'))}</select></label></div>
-    <label id="rowEtapa" class="${def.tipo === 'entrada' ? 'hidden' : ''}">Etapa da obra <span class="muted">(opcional, para o orçamento por etapa)</span><select name="etapaObra">${opts(etapasOrc(), def.etapaObra || '', 'Sem etapa')}</select></label>
+    ${campoAporte(def.aporteTipo, def.destino)}
+    <label id="rowEtapa" class="so-obra ${def.tipo === 'entrada' ? 'hidden' : ''}">Etapa da obra <span class="muted">(opcional, para o orçamento por etapa)</span><select name="etapaObra">${opts(etapasOrc(), def.etapaObra || '', 'Sem etapa')}</select></label>
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required placeholder="0,00" value="${def.valor ? fNum2.format(Math.abs(def.valor)) : ''}"></label>
       <label>O valor informado é<select name="modo"><option value="total">Total (dividir entre lotes e parcelas)</option><option value="cada">De cada lançamento</option></select></label></div>
+    ${campoAmbito(def.ambito)}
     ${campoObra(def.quadra && def.quadra !== '-' ? obraDe(def.quadra) : '', def.emp)}
-    <div class="g2"><label>Quadra<select name="quadra">${opts(quadrasOpts(), def.quadra || '-')}</select></label>
+    <div class="g2"><label class="so-obra">Quadra<select name="quadra">${opts(quadrasOpts(), def.quadra || '-')}</select></label>
       <label>Vencimento${'<input type="date" name="venc" required value="' + (def.venc || h) + '">'}</label></div>
-    <div id="boxLotes"></div>
+    <div id="boxLotes" class="so-obra"></div>
     <label class="chk"><input type="checkbox" name="recorrente" ${def.recorrente ? 'checked' : ''}> Conta recorrente, sem data final (contador, aluguel, internet…)</label>
     <div id="boxRec" class="g2 hidden"><label>Repete<select name="freq">${opts(FREQ, '1')}</select></label><label>Termina em <span class="muted">(opcional)</span><input type="date" name="fimRec"></label></div>
     <div class="g2" id="rowParc"><label>Parcelas<input name="parcelas" type="number" min="1" max="240" value="1" inputmode="numeric"></label>
@@ -740,7 +750,7 @@ function formNovo(def = {}) {
   F.addEventListener('change', e => { const nm = e.target.name; if (['intervalo', 'modo', 'lotes'].includes(nm)) recalcParc(); if (nm === 'util') { setPrefUtil(F.util.checked); renderParc(); } });
   const gerar = () => {
     const v = parseBR(F.valor.value); const n = parc.length || 1;
-    const lotes = $$('[name=lotes]:checked', F).map(c => c.value); const L = lotes.length ? lotes : ['-'];
+    const lotes = F.ambito.value === 'empresa' ? [] : $$('[name=lotes]:checked', F).map(c => c.value); const L = lotes.length ? lotes : ['-'];
     const total = L.length * n;
     if (!(v > 0)) return { erro: 'Informe um valor maior que zero.', total };
     if (parc.some(p => !p.d)) return { erro: 'Preencha a data de todas as parcelas.', total };
@@ -757,7 +767,9 @@ function formNovo(def = {}) {
         const t = { id: uid(), item, valor, juros: 0, ...(F.fornCnpj.value ? { fornCnpj: F.fornCnpj.value } : {}), nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
         if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
         if (venc !== parc[i].d) t.vencOrig = parc[i].d;
-        if (F.etapaObra.value && tipo === 'saida') t.etapaObra = F.etapaObra.value;
+        if (F.etapaObra.value && tipo === 'saida' && F.ambito.value !== 'empresa') t.etapaObra = F.etapaObra.value;
+        if (F.ambito.value === 'empresa') { t.ambito = 'empresa'; t.quadra = '-'; t.lote = '-'; t.local = ''; }
+        if (secaoDe(F.destino.value) === 'aporte' && F.aporteTipo.value) t.aporteTipo = F.aporteTipo.value;
         empDoForm(F, t);
         const qt = parseBR(F.qtd.value); if (qt > 0) { t.qtd = Math.round((F.modo.value === 'cada' ? qt : qt / total) * 1000) / 1000; t.unid = F.unid.value.trim(); }
         if (def.conc && total === 1) t.conc = def.conc;
@@ -783,6 +795,9 @@ function formNovo(def = {}) {
   F.quadra.onchange = () => { if (F.obra && F.quadra.value !== '-') F.obra.value = obraDe(F.quadra.value); sincEmp(F); lotesBox(); recalcParc(); prev(); };
   if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; lotesBox(); recalcParc(); prev(); } sincEmp(F); };
   if (F.emp) { F.emp.onchange = () => sincEmp(F); sincEmp(F); }
+  F.ambito.onchange = () => { modoAmbito(F); lotesBox(); recalcParc(); sincEmp(F); prev(); }; modoAmbito(F);
+  F.destino.addEventListener('change', () => sincAporte(F)); sincAporte(F);
+  F.item.addEventListener('change', () => aplicarRegrasForm(F, tipo));
   F.realizado.onchange = () => { real(); prev(); };
   F.recorrente.onchange = () => { modoRec(); prev(); }; modoRec();
   F.addEventListener('input', prev); F.addEventListener('change', prev);
@@ -838,7 +853,7 @@ function formNovo(def = {}) {
       const v = parseBR(F.valor.value); if (!(v > 0)) { toast('Informe um valor maior que zero.', 'err'); return; }
       if ($$('[name=lotes]:checked', F).length) { toast('Conta recorrente não divide por lotes. Desmarque os lotes.', 'err'); return; }
       if (F.fimRec.value && F.fimRec.value < F.venc.value) { toast('A data final é anterior ao primeiro vencimento.', 'err'); return; }
-      const r = { id: uid(), item: F.item.value.trim(), valor: (tipo === 'saida' ? -1 : 1) * r2(v), destino: F.destino.value, forn: F.forn.value.trim(), local: obraDoForm(F), quadra: F.quadra.value, emp: F.emp ? F.emp.value : '', obs: F.obs.value.trim(), inicio: F.venc.value, passo: +F.freq.value, fim: F.fimRec.value || '', util: F.util.checked, ativo: true, criado: Date.now(), por: S.user?.email || '' };
+      const r = { id: uid(), item: F.item.value.trim(), valor: (tipo === 'saida' ? -1 : 1) * r2(v), destino: F.destino.value, forn: F.forn.value.trim(), local: obraDoForm(F), quadra: F.quadra.value, ambito: F.ambito.value === 'empresa' ? 'empresa' : '', ...(secaoDe(F.destino.value) === 'aporte' && F.aporteTipo.value ? { aporteTipo: F.aporteTipo.value } : {}), emp: F.emp ? F.emp.value : '', obs: F.obs.value.trim(), inicio: F.venc.value, passo: +F.freq.value, fim: F.fimRec.value || '', util: F.util.checked, ativo: true, criado: Date.now(), por: S.user?.email || '' };
       salvarRec(r); f.fechar(); gerarRecorrencias(); toast('Conta recorrente criada'); return;
     }
     const g = gerar(); if (g.erro) { toast(g.erro, 'err'); return; } if (!g.lista.length) { toast('Informe valores maiores que zero.', 'err'); return; }
@@ -856,11 +871,13 @@ function formEditar(t) {
     <div class="seg full" id="segTipo"><button type="button" data-v="saida" class="${t.valor < 0 ? 'on' : ''}">Saída</button><button type="button" data-v="entrada" class="${t.valor >= 0 ? 'on' : ''}">Entrada</button></div>
     <label>Descrição<input name="item" required value="${esc(t.item)}"></label>
     <div class="g2"><label>Fornecedor / cliente<input name="forn" value="${esc(t.forn || '')}"></label><label>Destino<select name="destino">${optsDestino(t.destino)}${todosDestinos().includes(t.destino) ? '' : `<option selected>${esc(t.destino)}</option>`}</select></label></div>
-    ${t.valor < 0 ? `<label>Etapa da obra<select name="etapaObra">${opts(etapasOrc().concat(t.etapaObra && !etapasOrc().includes(t.etapaObra) ? [t.etapaObra] : []), t.etapaObra || '', 'Sem etapa')}</select></label>` : ''}
+    ${campoAporte(t.aporteTipo, t.destino)}
+    ${t.valor < 0 ? `<label class="so-obra">Etapa da obra<select name="etapaObra">${opts(etapasOrc().concat(t.etapaObra && !etapasOrc().includes(t.etapaObra) ? [t.etapaObra] : []), t.etapaObra || '', 'Sem etapa')}</select></label>` : ''}
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required value="${fNum2.format(Math.abs(t.valor))}"></label><label>Vencimento<input type="date" name="venc" required value="${esc(t.venc)}"></label></div>
     <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Se cair em fim de semana ou feriado, passar para o próximo dia útil</label><p class="hint-data" id="edHint"></p>
-    ${campoObra(obraT(t), empDef(t) ? t.emp : '')}
-    <div class="g2"><label>Quadra<select name="quadra">${opts(quadrasOpts(), t.quadra || '-')}${(t.quadra && t.quadra !== '-' && !E().quadras.includes(t.quadra)) ? `<option selected>${esc(t.quadra)}</option>` : ''}</select></label>
+    ${campoAmbito(t.ambito)}
+    ${campoObra(obraT(t) || E().obras[0], empDef(t) ? t.emp : '')}
+    <div class="g2 so-obra"><label>Quadra<select name="quadra">${opts(quadrasOpts(), t.quadra || '-')}${(t.quadra && t.quadra !== '-' && !E().quadras.includes(t.quadra)) ? `<option selected>${esc(t.quadra)}</option>` : ''}</select></label>
       <label>Lote<select name="lote">${opts([['-', 'Sem lote (-)'], ...lots], t.lote || '-')}${(t.lote && t.lote !== '-' && !lots.includes(t.lote)) ? `<option selected>${esc(t.lote)}</option>` : ''}</select></label></div>
     ${pago(t) ? `<div class="g3"><label>Pago em<input type="date" name="pag" value="${esc(t.pag || t.venc)}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), t.conta)}</select></label><label>Juros/multa (R$)<input name="juros" inputmode="decimal" value="${t.juros ? fNum2.format(Math.abs(t.juros)) : ''}"></label></div>` : ''}
     <div class="g2"><label>Quantidade<input name="qtd" inputmode="decimal" value="${t.qtd ? String(t.qtd).replace('.', ',') : ''}"></label><label>Unidade<input name="unid" value="${esc(t.unid || '')}"></label></div>
@@ -874,12 +891,16 @@ function formEditar(t) {
   F.quadra.onchange = () => { const q = F.quadra.value; if (F.obra && q !== '-') F.obra.value = obraDe(q); sincEmp(F); F.lote.innerHTML = opts([['-', 'Sem lote (-)'], ...(q === '-' ? [] : lotesDe(q))], '-'); };
   if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; F.quadra.onchange(); } sincEmp(F); };
   if (F.emp) { F.emp.onchange = () => sincEmp(F); sincEmp(F); }
+  F.ambito.onchange = () => { modoAmbito(F); sincEmp(F); }; modoAmbito(F);
+  F.destino.addEventListener('change', () => sincAporte(F));
   F.onsubmit = e => {
     e.preventDefault(); const v = parseBR(F.valor.value); if (!(v >= 0)) { toast('Valor inválido', 'err'); return; }
     const sg = tipo === 'saida' ? -1 : 1;
     const n = { ...t, item: F.item.value.trim(), forn: F.forn.value.trim(), destino: F.destino.value, valor: sg * v, venc: F.util.checked ? proximoDiaUtil(F.venc.value) : F.venc.value, quadra: F.quadra.value, local: F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : (t.local || E().obras[0])), lote: F.lote.value, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), obs: F.obs.value.trim() };
     empDoForm(F, n);
     if (F.etapaObra) { if (F.etapaObra.value) n.etapaObra = F.etapaObra.value; else delete n.etapaObra; }
+    if (F.ambito.value === 'empresa') { n.ambito = 'empresa'; n.quadra = '-'; n.lote = '-'; n.local = ''; delete n.etapaObra; } else delete n.ambito;
+    if (secaoDe(n.destino) === 'aporte' && F.aporteTipo.value) n.aporteTipo = F.aporteTipo.value; else delete n.aporteTipo;
     { const qt = parseBR(F.qtd.value); if (qt > 0) { n.qtd = qt; n.unid = F.unid.value.trim(); } else { delete n.qtd; delete n.unid; } }
     if (pago(t)) { n.pag = F.pag.value; n.conta = F.conta.value; const j = parseBR(F.juros.value); n.juros = j > 0 ? sg * j : 0; }
     salvarTitulos([n]); f.fechar(); toast('Alteração salva');
@@ -920,7 +941,7 @@ function detalhe(t) {
     <div class="resumo"><b>${esc(t.item)}</b><div class="big ${cls(t.valor)}">${brl2(t.valor)}</div>
       ${pago(t) ? `<span class="chip ok">Pago em ${dBR(t.pag)} · ${esc(t.conta || '')}</span>` : venc ? `<span class="chip bad">Vencida em ${dBR(t.venc)}</span>` : `<span class="chip warn">Vence em ${dBR(t.venc)}</span>`}</div>
     <dl class="dl">
-      <dt>Destino</dt><dd>${esc(t.destino)}</dd><dt>Quadra · lote</dt><dd>${esc(t.quadra || '-')} · ${esc(t.lote || '-')}</dd>
+      <dt>Destino</dt><dd>${esc(t.destino)}${t.aporteTipo ? ' · ' + esc(tipoAporteNome(t.aporteTipo)) : ''}</dd><dt>Pertence a</dt><dd>${ehEmpresa(t) ? 'Empresa (administrativo)' : `${esc(obraT(t))} · quadra ${esc(t.quadra || '-')} · lote ${esc(t.lote || '-')}`}${variasEmpresas() ? ' · ' + esc(empPorId(empT(t))?.nome || '') : ''}</dd>
       <dt>Vencimento</dt><dd>${dBR(t.venc)}</dd>${t.juros ? `<dt>Juros / multa</dt><dd class="neg">${brl2(t.juros)}</dd>` : ''}
       ${t.forn ? `<dt>Fornecedor</dt><dd>${esc(t.forn)}</dd>` : ''}<dt>Nota fiscal</dt><dd>${t.nf ? (t.nfNum ? 'Nº ' + esc(t.nfNum) : 'Sim') : 'Não'}</dd>
       ${t.obs ? `<dt>Observação</dt><dd>${esc(t.obs)}</dd>` : ''}${grupo.length > 1 ? `<dt>Grupo</dt><dd>${grupo.length} lançamentos (${grupo.filter(pago).length} pagos)</dd>` : ''}
@@ -1197,7 +1218,7 @@ const listaSel = new Set();
 function linhaTitulo(t, o = {}) {
   const h = hoje(); const venc = !pago(t) && t.venc < h; const hj = !pago(t) && t.venc === h;
   const d = o.data === 'pag' ? (t.pag || t.venc) : t.venc;
-  const meta = `<span class="loc">${esc(t.quadra && t.quadra !== '-' ? t.quadra + (t.lote && t.lote !== '-' ? ' ' + t.lote : '') : 'Geral')}</span>` + [t.destino, t.forn, t.nf ? (t.nfNum ? 'NF ' + t.nfNum : 'com NF') : '', anexosDe(t).length ? (anexosDe(t).length > 1 ? anexosDe(t).length + ' anexos' : 'anexo') : '', t.rec ? 'recorrente' : ''].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('') + (variasEmpresas() ? (empDiverge(t) ? `<span class="chip warn" title="CNPJ diferente do CNPJ da obra">${esc(empPorId(t.emp).nome)} ≠ obra</span>` : !empDef(t) ? '<span class="chip">sem CNPJ</span>' : '') : '');
+  const meta = `<span class="loc">${esc(ehEmpresa(t) ? 'Empresa' : t.quadra && t.quadra !== '-' ? t.quadra + (t.lote && t.lote !== '-' ? ' ' + t.lote : '') : 'Geral da obra')}</span>` + [t.destino, t.forn, t.nf ? (t.nfNum ? 'NF ' + t.nfNum : 'com NF') : '', anexosDe(t).length ? (anexosDe(t).length > 1 ? anexosDe(t).length + ' anexos' : 'anexo') : '', t.rec ? 'recorrente' : ''].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('') + (variasEmpresas() ? (empDiverge(t) ? `<span class="chip warn" title="CNPJ diferente do CNPJ da obra">${esc(empPorId(t.emp).nome)} ≠ obra</span>` : !empDef(t) ? '<span class="chip">sem CNPJ</span>' : '') : '');
   return `<div class="tr ${o.sel ? 'selmode' : ''} ${listaSel.has(t.id) ? 'sel' : ''}" data-act="${o.sel ? 'tsel' : 'abrir'}" data-id="${t.id}">
     ${o.sel ? `<span class="cb">${listaSel.has(t.id) ? '✓' : ''}</span>` : ''}
     ${o.semData ? '' : `<div class="td-date"><b>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '—'}</b><small>${d ? d.slice(0, 4) : ''}</small></div>`}
@@ -1360,7 +1381,7 @@ function viewLista(modo) {
         <select id="fper">${opts(per, F.per)}</select>
         <span id="fcustom" class="${F.per === 'custom' ? '' : 'hidden'}"><input type="date" id="fini" value="${F.ini}"> até <input type="date" id="ffim" value="${F.fim}"></span>
         ${variasEmpresas() ? `<select id="femp">${opts([...empOpts(), ['__sem', 'Sem CNPJ definido'], ['__div', 'CNPJ diferente da obra']], F.emp, 'Todas as empresas')}</select>` : ''}
-        ${variasObras() ? `<select id="fobra">${opts(E().obras, F.obra, 'Todas as obras')}</select>` : ''}
+        ${variasObras() || S.list.some(ehEmpresa) ? `<select id="fobra">${opts([...E().obras, ['__emp', 'Empresa (fora das obras)']], F.obra, 'Todas as obras')}</select>` : ''}
         <select id="fquadra">${opts(quadrasOpts().map(([v, l]) => [v, l.replace('Quadra ', '')]), F.quadra, 'Todas as quadras')}</select>
         <select id="fdest">${opts(todosDestinos(), F.dest, 'Todos os destinos')}</select>
         <label class="tgl"><input type="checkbox" id="fgrp" ${agrup ? 'checked' : ''}> Agrupar lotes</label>
@@ -1389,7 +1410,7 @@ function viewLista(modo) {
         if (modo === 'receber' && !(t.valor > 0)) return false;
         if (st === 'aberto' && pago(t)) return false; if (st === 'pago' && !pago(t)) return false;
         if (F.per === 'vencidas' && pago(t)) return false;
-        if (F.emp === '__sem') { if (empDef(t)) return false; } else if (F.emp === '__div') { if (!empDiverge(t)) return false; } else if (F.emp && empT(t) !== F.emp) return false; if (F.obra && obraT(t) !== F.obra) return false; if (F.quadra && t.quadra !== F.quadra) return false; if (F.dest && t.destino !== F.dest) return false;
+        if (F.emp === '__sem') { if (empDef(t)) return false; } else if (F.emp === '__div') { if (!empDiverge(t)) return false; } else if (F.emp && empT(t) !== F.emp) return false; if (F.obra === '__emp') { if (!ehEmpresa(t)) return false; } else if (F.obra && obraT(t) !== F.obra) return false; if (F.quadra && t.quadra !== F.quadra) return false; if (F.dest && t.destino !== F.dest) return false;
         if (F.conta && t.conta !== F.conta) return false;
         if (q && !(t.item.toLowerCase().includes(q) || (t.forn || '').toLowerCase().includes(q) || (t.obs || '').toLowerCase().includes(q) || (t.nfNum || '').includes(q))) return false;
         return okPer(campo === 'pag' ? (t.pag || t.venc) : t.venc);
@@ -1475,7 +1496,7 @@ function obraQuadra(el, q) {
   const s = resumoQuadra(q);
   const real = byDest(S.list.filter(t => t.quadra === q && pago(t))), pag = byDest(S.list.filter(t => t.quadra === q && !pago(t) && t.valor < 0)), p = previstoLote(q);
   const sec = secoesViab(); const labs = [...sec.op, ...sec.nonop].filter(k => Math.abs(p[k] || 0) > .5 || Math.abs(real[k] || 0) > .5 || Math.abs(pag[k] || 0) > .5);
-  el.innerHTML = `<div class="grid kpis">${kpi('Lotes', s.n, '', '')}${kpi('Custo realizado', brl(s.custo), s.n ? short(s.custo / s.n) + ' por lote' : '', 'neg')}${kpi('A pagar', brl(s.pagar), '', 'neg')}${kpi('Receita realizada', brl(s.receita), '', 'pos')}${kpi('A receber', brl(s.receber), '', 'pos')}${kpi('Resultado projetado', brl(s.proj), 'previsto ' + brl(s.prevRes), cls(s.proj))}${kpi('Checklist', s.cl === null ? '—' : fPct.format(s.cl), 'documentos', '', '#/checklist/' + encodeURIComponent(q))}</div>
+  el.innerHTML = `<div class="grid kpis">${kpi('Lotes', s.n, '', '')}${kpi('Custo realizado', brl(s.custo), s.n ? short(s.custo / s.n) + ' por lote' : '', 'neg')}${kpi('A pagar', brl(s.pagar), '', 'neg')}${kpi('Receita realizada', brl(s.receita), '', 'pos')}${kpi('A receber', brl(s.receber), '', 'pos')}${kpi('Resultado projetado', brl(s.proj), (admQuadra(q) > 0.5 ? 'após administração rateada ' + brl(s.proj - admQuadra(q)) + ' · ' : '') + 'previsto ' + brl(s.prevRes), cls(s.proj))}${kpi('Checklist', s.cl === null ? '—' : fPct.format(s.cl), 'documentos', '', '#/checklist/' + encodeURIComponent(q))}</div>
   <div class="grid two">
     <div class="card"><h2>Previsto x realizado <span class="hint">quadra inteira</span> <button class="btn sm" id="bOrc">Editar orçamento</button></h2>
       <div class="legend"><span style="--c:var(--pend)">Previsto</span><span style="--c:var(--bal)">Realizado</span><span style="--c:var(--steel)">A pagar</span></div><div class="chartbox tall"><canvas id="cQ"></canvas></div></div>
@@ -1513,7 +1534,8 @@ function obraLote(el, q, l) {
   const iP = indicadores(P), iR = indicadores(R), iC = indicadores(C);
   const ind = [['ROI', 'roi', pct], ['Lucro operacional', 'lop', brl], ['Margem operacional', 'mop', pct], ['Lucro líquido', 'll', brl], ['Margem líquida', 'ml', pct]];
   const custo = sum(ts.filter(t => pago(t) && t.destino !== 'Aporte'), t => Math.min(t.valor, 0) + Math.min(t.juros || 0, 0));
-  el.innerHTML = `<div class="grid kpis">${kpi('Custo realizado', brl(custo), 'previsto ' + brl(iP.op + iP.non), 'neg')}${kpi('Lucro líquido projetado', brl(iC.ll), 'previsto ' + brl(iP.ll), cls(iC.ll))}${kpi('ROI projetado', pct(iC.roi), 'previsto ' + pct(iP.roi), '')}${kpi('Checklist', ckPct(q, l) === null ? '—' : fPct.format(ckPct(q, l)), 'documentos', '', '#/checklist/' + encodeURIComponent(q))}</div>
+  const adm = admLote(q, l);
+  el.innerHTML = `<div class="grid kpis">${kpi('Custo realizado', brl(custo), (adm > 0.5 ? '+ ' + brl(adm) + ' de administração rateada · ' : '') + 'previsto ' + brl(iP.op + iP.non), 'neg')}${kpi('Lucro líquido projetado', brl(iC.ll), 'previsto ' + brl(iP.ll), cls(iC.ll))}${kpi('ROI projetado', pct(iC.roi), 'previsto ' + pct(iP.roi), '')}${kpi('Checklist', ckPct(q, l) === null ? '—' : fPct.format(ckPct(q, l)), 'documentos', '', '#/checklist/' + encodeURIComponent(q))}</div>
   <div class="grid lg"><div class="card"><h2>Viabilidade <span class="hint">projetado = realizado + em aberto</span></h2><div class="tbl-wrap"><table class="tbl">${html}</tbody></table></div></div>
   <div class="card"><h2>Indicadores</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Indicador</th><th>Previsto</th><th>Realizado</th><th>Projetado</th></tr></thead><tbody>${ind.map(([n, k, fm]) => `<tr><td class="l">${n}</td><td>${fm(iP[k])}</td><td class="${typeof iR[k] === 'number' ? cls(iR[k]) : ''}">${fm(iR[k])}</td><td class="${typeof iC[k] === 'number' ? cls(iC[k]) : ''}"><b>${fm(iC[k])}</b></td></tr>`).join('')}</tbody></table></div>
   <p class="muted small">Realizado considera só o que já foi pago/recebido. Enquanto a venda não entra, o resultado realizado fica negativo.</p></div></div>
@@ -1741,8 +1763,8 @@ VIEWS.cadastros = {
     el.innerHTML = `<div class="grid two">
       <div class="card"><h2>Obras <button class="btn sm rw" data-act="cadObra">Nova obra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Obra</th>${variasEmpresas() ? '<th class="l">Empresa</th>' : ''}<th>Quadras</th><th>Lanç.</th><th></th></tr></thead><tbody>
         ${e.obras.map(o => `<tr><td class="l"><b>${esc(o)}</b></td>${variasEmpresas() ? `<td class="l">${esc(empRotulo(empPorId(empDaObra(o)), true))}</td>` : ''}<td>${quadrasDaObra(o).length}</td><td>${S.list.filter(x => obraT(x) === o).length}</td><td><button class="btn sm rw" data-act="cadObra" data-o="${esc(o)}">Editar</button></td></tr>`).join('')}</tbody></table></div></div>
-      <div class="card"><h2>Contas bancárias <button class="btn sm" data-act="cadConta">Adicionar</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Conta</th><th>Saldo inicial</th><th>Saldo atual</th><th></th></tr></thead><tbody>
-        ${saldos().contas.map(c => `<tr><td class="l"><b>${esc(c.nome)}</b>${variasEmpresas() ? `<br><span class="muted small">${esc(empRotulo(empPorId(empConta(c.nome)), true))}</span>` : ''}</td><td>${brl2(c.inicial)}</td><td class="${cls(c.saldo)}">${brl2(c.saldo)}</td><td>${e.contas.some(x => x.nome === c.nome) ? `<button class="btn sm" data-act="cadConta" data-nome="${esc(c.nome)}">Editar</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="card"><h2>Contas bancárias <button class="btn sm" data-act="cadConta">Adicionar</button><button class="btn sm" data-act="transferir">Transferir</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Conta</th><th>Saldo inicial</th><th>Saldo atual</th><th></th></tr></thead><tbody>
+        ${saldos().contas.map(c => { const cd = e.contas.find(x => x.nome === c.nome) || {}; return { ...c, cd }; }).map(c => `<tr><td class="l"><b>${esc(c.nome)}</b>${c.cd.num ? `<br><span class="muted small">${esc([c.cd.banco, c.cd.ag ? 'ag. ' + c.cd.ag : '', 'cc ' + c.cd.num].filter(Boolean).join(' · '))}</span>` : `<br><span class="small" style="color:var(--warn)">sem número da conta</span>`}${variasEmpresas() ? `<br><span class="muted small">${esc(empRotulo(empPorId(empConta(c.nome)), true))}</span>` : ''}</td><td>${brl2(c.inicial)}</td><td class="${cls(c.saldo)}">${brl2(c.saldo)}</td><td>${e.contas.some(x => x.nome === c.nome) ? `<button class="btn sm" data-act="cadConta" data-nome="${esc(c.nome)}">Editar</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>
     </div>
     <div class="card"><h2>Empresas (CNPJ) <button class="btn sm rw" data-act="cadEmp">Nova filial</button></h2>
       <p class="muted small">Cadastre a matriz e cada filial aberta para um projeto no RET. Cada obra pertence a um CNPJ, e os lançamentos da obra vão para ele.</p>
@@ -1828,10 +1850,12 @@ ACOES.cadLocal = () => { const f = folha('Local da obra', `<form class="form" id
 ACOES.cadConta = d => {
   const c = E().contas.find(x => x.nome === d.nome);
   const f = folha(c ? 'Editar conta' : 'Nova conta bancária', `<form class="form" id="fx"><label>Nome<input name="nome" value="${esc(c?.nome || '')}" required ${c ? 'readonly' : ''}></label><label>Saldo inicial (R$)<input name="ini" inputmode="decimal" value="${c ? fNum2.format(c.inicial || 0) : '0,00'}"></label>
-    ${variasEmpresas() ? `<label>Empresa dona da conta<select name="emp">${opts(empOpts(), c ? empConta(c.nome) : matrizId())}</select></label>` : ''}
+    <div class="g3"><label>Banco<input name="banco" value="${esc(c?.banco || '')}" placeholder="Ex.: BTG Pactual (208)"></label><label>Agência<input name="ag" inputmode="numeric" value="${esc(c?.ag || '')}"></label><label>Conta<input name="num" value="${esc(c?.num || '')}" placeholder="00000-0"></label></div>
+    <label>Tipo<select name="tipoC">${opts([['corrente', 'Conta corrente'], ['aplicacao', 'Aplicação / investimento'], ['caixa', 'Dinheiro em caixa']], c?.tipoC || 'corrente')}</select></label>
+    <label>Empresa (CNPJ) dona da conta<select name="emp">${opts(empOpts(), c ? empConta(c.nome) : matrizId())}</select></label>
     <div class="acts">${c && !usados('conta', c.nome) ? '<button type="button" class="btn danger ghost" id="rm">Remover</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fx');
-  F.onsubmit = e => { e.preventDefault(); const n = clone(E()); const nome = F.nome.value.trim(); const ini = parseBR(F.ini.value) || 0; const i = n.contas.findIndex(x => x.nome === nome); if (i >= 0) n.contas[i].inicial = ini; else n.contas.push({ nome, inicial: ini }); if (F.emp) n.contas[i >= 0 ? i : n.contas.length - 1].emp = F.emp.value; salvarEstrutura(n); f.fechar(); };
+  F.onsubmit = e => { e.preventDefault(); const n = clone(E()); const nome = F.nome.value.trim(); const ini = parseBR(F.ini.value) || 0; const i = n.contas.findIndex(x => x.nome === nome); if (i >= 0) n.contas[i].inicial = ini; else n.contas.push({ nome, inicial: ini }); const cc = n.contas[i >= 0 ? i : n.contas.length - 1]; if (F.emp) cc.emp = F.emp.value; cc.banco = F.banco.value.trim(); cc.ag = F.ag.value.trim(); cc.num = F.num.value.trim(); cc.tipoC = F.tipoC.value; salvarEstrutura(n); f.fechar(); };
   const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { const n = clone(E()); n.contas = n.contas.filter(x => x.nome !== c.nome); salvarEstrutura(n); f.fechar(); };
 };
 ACOES.cadQuadra = d => {
@@ -1934,7 +1958,7 @@ function lerExtratoBanco(txt) {
       return { id: 'k' + hashTxt(fit), d, desc, v };
     }).filter(l => /^\d{4}-\d{2}-\d{2}$/.test(l.d) && isFinite(l.v));
     const bal = txt.match(/<LEDGERBAL>[\s\S]*?<BALAMT>\s*([-\d.,]+)/i), dta = txt.match(/<LEDGERBAL>[\s\S]*?<DTASOF>\s*(\d{8})/i);
-    return { linhas, saldo: bal ? parseFloat(bal[1].replace(',', '.')) : null, saldoData: dta ? dta[1].slice(0, 4) + '-' + dta[1].slice(4, 6) + '-' + dta[1].slice(6, 8) : '' };
+    return { acct: tag(txt, 'ACCTID'), linhas, saldo: bal ? parseFloat(bal[1].replace(',', '.')) : null, saldoData: dta ? dta[1].slice(0, 4) + '-' + dta[1].slice(4, 6) + '-' + dta[1].slice(6, 8) : '' };
   }
   // CSV: data; descrição; valor (separador ; ou ,)
   const rows = txt.split(/\r?\n/).filter(r => r.trim());
@@ -2005,6 +2029,7 @@ VIEWS.conciliacao = {
         const buf = new Uint8Array(await file.arrayBuffer());
         let txt = new TextDecoder('utf-8').decode(buf); if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1252').decode(buf);
         const r = lerExtratoBanco(txt); if (!r.linhas.length) { toast('Não encontrei lançamentos nesse arquivo.', 'err'); return; }
+        if (r.acct) { const dig = soDig(r.acct); const achou = E().contas.find(c => c.num && dig && (soDig(c.num).endsWith(dig.slice(-5)) || dig.endsWith(soDig(c.num).slice(-5)))); if (achou && achou.nome !== concConta && await confirmar(`Este extrato é da conta ${esc(r.acct)}, cadastrada como <b>${esc(achou.nome)}</b>. Importar nela em vez de ${esc(concConta)}?`, 'Usar ' + achou.nome, false)) { concConta = achou.nome; } }
         const linhas = {}; const atuais = (S.extratos && S.extratos[contaId(concConta)] && S.extratos[contaId(concConta)].linhas) || {};
         r.linhas.forEach(l => { if (!atuais[l.id]) linhas[l.id] = JSON.stringify(l); });
         const dados = { conta: concConta, linhas, importado: Date.now() }; if (r.saldo != null) { dados.saldo = r.saldo; dados.saldoData = r.saldoData; }
@@ -2759,15 +2784,15 @@ function balancoDe(L, emp, D) {
   const dispon = emp ? ini + sum(S.list.filter(t => pago(t) && dt(t) <= D && nomes.has(t.conta || '')), v) : caixaTeo;
   const existia = t => t.venc <= D || (t.criado && isoLocal(new Date(t.criado)) <= D);
   const ab = L.filter(t => (!pago(t) || dt(t) > D) && existia(t));
-  const lim = addDays(D, 365); const ap = t => secaoDe(t.destino) === 'aporte';
+  const lim = addDays(D, 365); const ap0 = t => secaoDe(t.destino) === 'aporte'; const emprest = t => ap0(t) && ['emprestimo', 'devolucao', 'terceiro'].includes(t.aporteTipo); const ap = t => ap0(t) && !emprest(t);
   const o = {
     dispon, inter: caixaTeo - dispon,
     recCP: sum(ab.filter(t => t.valor > 0 && t.venc <= lim), t => t.valor), recLP: sum(ab.filter(t => t.valor > 0 && t.venc > lim), t => t.valor),
     pagCP: -sum(ab.filter(t => t.valor < 0 && t.venc <= lim), t => t.valor), pagLP: -sum(ab.filter(t => t.valor < 0 && t.venc > lim), t => t.valor),
-    capital: ini, aportes: sum(realL.filter(ap), v) + sum(ab.filter(ap), t => t.valor),
-    resReal: sum(realL.filter(t => !ap(t)), v), resAReal: sum(ab.filter(t => !ap(t)), t => t.valor)
+    capital: ini, aportes: sum(realL.filter(ap), v) + sum(ab.filter(ap), t => t.valor), emprest: sum(realL.filter(emprest), v) + sum(ab.filter(emprest), t => t.valor),
+    resReal: sum(realL.filter(t => !ap0(t)), v), resAReal: sum(ab.filter(t => !ap0(t)), t => t.valor)
   };
-  o.ativo = o.dispon + Math.max(0, o.inter) + o.recCP + o.recLP; o.passivo = o.pagCP + o.pagLP + Math.max(0, -o.inter); o.pl = o.capital + o.aportes + o.resReal + o.resAReal;
+  o.ativo = o.dispon + Math.max(0, o.inter) + o.recCP + o.recLP; o.passivo = o.pagCP + o.pagLP + Math.max(0, -o.inter) + o.emprest; o.pl = o.capital + o.aportes + o.resReal + o.resAReal;
   return o;
 }
 function periodosDem() {
@@ -2827,9 +2852,10 @@ function linhasDem() {
     linha('  Contas a pagar (até 12 meses)', b => b.pagCP, 'item'),
     linha('  Contas a pagar (após 12 meses)', b => b.pagLP, 'item'),
     ...(demEmp ? [linha('  Débitos com empresas do grupo', b => Math.max(0, -b.inter), 'item')] : []),
+    linha('  Empréstimos de sócios e terceiros', b => b.emprest, 'item'),
     linha('PATRIMÔNIO LÍQUIDO', b => b.pl, 'grand'),
     linha('  Capital inicial (saldo inicial das contas)', b => b.capital, 'item'),
-    linha('  Aportes', b => b.aportes, 'item'),
+    linha('  Aportes de capital e retiradas', b => b.aportes, 'item'),
     linha('  Resultado acumulado realizado', b => b.resReal, 'item'),
     linha('  Resultado a realizar (a receber − a pagar)', b => b.resAReal, 'item'),
     linha('Passivo + patrimônio líquido', b => b.passivo + b.pl, 'total')
@@ -3125,4 +3151,4 @@ else onAuthStateChanged(auth, u => {
   if (u) { S.user = u; iniciarDados(); montarShell(); setTimeout(() => sincronizarDrive(false), 6000); setTimeout(() => carregarLib('chart').catch(() => {}), 2500); }
   else { S.user = null; pararDados(); document.removeEventListener('click', onClick); atual = { nome: null, args: [], view: null }; telaLogin(); }
 });
-window.__sfg = { S, hoje };
+window.__sfg = { S, hoje, E };
