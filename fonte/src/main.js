@@ -305,7 +305,7 @@ function iniciarDados() {
     S[key] = snap.exists() ? snap.data() : null; if (key === 'estrutura') S.loaded.estrutura = true; agendarRefresh();
   }, e => console.error(e)));
   cfg('estrutura', 'estrutura'); cfg('orcamento', 'orcamento'); cfg('checklist', 'checklist');
-  cfg('drive', 'drive'); cfg('docsdrive', 'docsdrive'); cfg('agenda', 'agenda'); cfg('lixeira', 'lixeira'); cfg('recorrencias', 'recorrencias'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
+  cfg('drive', 'drive'); cfg('fluxo', 'fluxo'); cfg('docsdrive', 'docsdrive'); cfg('agenda', 'agenda'); cfg('lixeira', 'lixeira'); cfg('recorrencias', 'recorrencias'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
   S.unsubs.push(onSnapshot(doc(db, 'config', 'acesso'), s => { S.acesso = s.exists() ? s.data() : null; document.body.classList.toggle('ro', somenteLeitura()); agendarRefresh(); }, e => console.warn(e)));
   S.unsubs.push(onSnapshot(collection(db, 'extratos'), s => { S.extratos = {}; s.forEach(d => S.extratos[d.id] = d.data()); agendarRefresh(); }, e => console.warn(e)));
 }
@@ -358,13 +358,15 @@ const IC = {
   recorrentes: '<path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/>',
   demonstrativos: '<path d="M4 4h16v16H4zM4 9h16M9 9v11M14 13h3M14 16h3"/>',
   scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16 8v8"/>',
+  movimento: '<path d="M3 3v18h18M7 15l3-3 3 3 5-6"/><path d="M7 19v-2M11 19v-4M15 19v-3M19 19v-6"/>',
+  etapas: '<rect x="3" y="4" width="6" height="5" rx="1"/><rect x="15" y="4" width="6" height="5" rx="1"/><rect x="9" y="15" width="6" height="5" rx="1"/><path d="M9 6.5h6M18 9v3H12v3"/>',
   clip: '<path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>'
 };
 const ic = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 
 const NAV = [
-  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['demonstrativos', 'DRE, DFC e BP'], ['relatorios', 'Relatório mensal'],
-  ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['cronograma', 'Cronograma'], ['vendas', 'Vendas e repasses'], ['checklist', 'Checklist'], ['simulador', 'Simulador'],
+  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['movimento', 'Histórico financeiro'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['demonstrativos', 'DRE, DFC e BP'], ['relatorios', 'Relatório mensal'],
+  ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['cronograma', 'Cronograma'], ['vendas', 'Vendas e repasses'], ['checklist', 'Checklist'], ['etapas', 'Fluxo do lote'], ['simulador', 'Simulador'],
   ['#', 'Gestão'], ['empresas', 'Empresas (CNPJ)'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['historico', 'Histórico e lixeira'], ['dados', 'Dados e backup']
 ];
 const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg', LOGO_COMPLETO = 'icons/logo-azul-incorporadora.svg';
@@ -1624,7 +1626,7 @@ ACOES.ckLote = d => {
     <span class="ckdoc-acts">${e.arq ? `<a class="btn sm" href="https://drive.google.com/file/d/${esc(e.arq.i)}/view" target="_blank" rel="noopener">Abrir</a>` : ''}<label class="btn sm file rw">Enviar<input type="file" data-up="${i}" accept="image/*,application/pdf" hidden></label><button type="button" class="btn sm ghost rw" data-man="${i}">${e.manual ? 'Desmarcar' : 'Marcar'}</button></span></div>`; };
   const f = folha(`Documentos · Quadra ${q}, lote ${l}`, `<div class="ckdocs">${docs.map(linha).join('')}</div>
     ${outros.length ? `<p class="muted small">Arquivos na pasta do lote sem documento reconhecido: ${esc(outros.join(', '))}. Coloque o nome do documento no nome do arquivo.</p>` : ''}
-    <div class="acts left">${pl ? `<a class="btn" href="https://drive.google.com/drive/folders/${esc(pl)}" target="_blank" rel="noopener">Abrir pasta do lote no Drive</a>` : ''}</div>`, { largo: true });
+    <div class="acts left"><a class="btn" href="#/etapas/${encodeURIComponent(q)}/${encodeURIComponent(l)}" data-close>Ver fluxo e prazos do lote</a>${pl ? `<a class="btn" href="https://drive.google.com/drive/folders/${esc(pl)}" target="_blank" rel="noopener">Abrir pasta do lote no Drive</a>` : ''}</div>`, { largo: true });
   $$('[data-man]', f.el).forEach(b => b.onclick = () => { ACOES.ck({ k: d.k, i: b.dataset.man }); f.fechar(); ACOES.ckLote(d); });
   $$('[data-up]', f.el).forEach(inp => inp.onchange = async () => {
     const file = inp.files[0]; if (!file) return; const doc = docs[+inp.dataset.up];
@@ -2272,6 +2274,270 @@ VIEWS.empresas = {
         <p class="muted small">Aportes e transferências entre CNPJs (destino Aporte) ficam fora do resultado, para não contar a mesma receita duas vezes.</p></div>` : ''}`;
   }
 };
+/* ---------- Histórico financeiro: por destino (Fluxo Bancário) e por quadra (Cronograma) ---------- */
+let hfAba = 'destino', hfIni = '', hfFim = '', hfProj = false, hfEmp = '', hfObra = '';
+const mesCurto = m => MES3[+m.slice(5, 7) - 1] + ' ' + m.slice(2, 4);
+function mesesEntre(a, b) { const out = []; let m = a; for (let k = 0; m <= b && k < 240; k++) { out.push(m); m = addMonths(m + '-01', 1).slice(0, 7); } return out; }
+function dadosHistorico() {
+  const h = hoje(), mesAtual = h.slice(0, 7);
+  let L = listaEmp(hfEmp); if (hfObra) L = L.filter(t => obraT(t) === hfObra);
+  const real = L.filter(pago), ab = hfProj ? L.filter(t => !pago(t)) : [];
+  const mesDe = t => pago(t) ? (t.pag || t.venc || '').slice(0, 7) : (t.venc < h ? mesAtual : t.venc.slice(0, 7));
+  const meses0 = real.map(mesDe).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+  if (!hfIni) hfIni = meses0[0] || mesAtual; if (!hfFim) hfFim = mesAtual;
+  let fim = hfFim; if (hfProj) { const ult = ab.map(mesDe).sort().pop(); const lim = addMonths(mesAtual + '-01', 12).slice(0, 7); if (ult && ult > fim) fim = ult > lim ? lim : ult; }
+  const meses = mesesEntre(hfIni, fim);
+  const base = sum(hfObra ? [] : contasEmp(hfEmp), c => +c.inicial || 0) + sum(real.filter(t => mesDe(t) < hfIni), t => t.valor + (t.juros || 0));
+  const doPer = [...real, ...ab].filter(t => { const m = mesDe(t); return m >= hfIni && m <= fim; });
+  return { meses, base, doPer, mesDe, mesAtual };
+}
+function tabelaHistorico() {
+  const { meses, base, doPer, mesDe, mesAtual } = dadosHistorico();
+  const idx = Object.fromEntries(meses.map((m, i) => [m, i])); const N = meses.length;
+  const proj = m => hfProj && m > mesAtual;
+  if (hfAba === 'destino') {
+    const por = {}; const add = (k, i, v) => { (por[k] = por[k] || Array(N).fill(0))[i] += v; };
+    for (const t of doPer) { const i = idx[mesDe(t)]; if (i === undefined) continue; add(t.destino || 'Sem destino', i, t.valor || 0); if (t.juros && pago(t)) add('Juros e Multa', i, t.juros); }
+    const sec = d => d === 'Juros e Multa' ? 'nonop' : secaoDe(d);
+    const ent = Object.keys(por).filter(d => ['rec', 'aporte'].includes(sec(d))).sort((a, b) => (sec(b) === 'aporte') - (sec(a) === 'aporte') || a.localeCompare(b));
+    const sai = Object.keys(por).filter(d => !ent.includes(d)).sort((a, b) => a.localeCompare(b));
+    const soma = ks => meses.map((_, i) => sum(ks, k => por[k][i]));
+    const tE = soma(ent), tS = soma(sai), res = meses.map((_, i) => tE[i] + tS[i]);
+    let ac = base; const acum = res.map(v => (ac += v));
+    const T = a => sum(a, x => x);
+    const rows = [['Entradas', tE, 'total'], ...ent.map(d => ['  ' + d, por[d], 'item']), ['Saídas', tS, 'total'], ...sai.map(d => ['  ' + d, por[d], 'item']), ['Resultado do mês', res, 'sub'], ['Saldo acumulado', acum, 'grand']];
+    return { tipo: 'destino', cols: meses.map(mesCurto), proj: meses.map(proj), rows: rows.map(([n, vs, s]) => [n, s === 'grand' ? null : T(vs), vs, s]), base };
+  }
+  // por quadra: linhas = meses, colunas = quadras (entradas e saídas)
+  const qs = (hfObra ? quadrasDaObra(hfObra) : E().quadras).filter(q => doPer.some(t => t.quadra === q));
+  const z = () => Array(N).fill(0);
+  const Q = Object.fromEntries(qs.map(q => [q, { e: z(), s: z() }])); const geral = z();
+  for (const t of doPer) {
+    const i = idx[mesDe(t)]; if (i === undefined) continue; const v = (t.valor || 0) + (pago(t) ? (t.juros || 0) : 0);
+    const c = Q[t.quadra]; if (!c) { geral[i] += v; continue; }
+    if (t.valor > 0) c.e[i] += t.valor; else c.s[i] += t.valor; if (pago(t) && t.juros) c.s[i] += t.juros;
+  }
+  const E_ = meses.map((_, i) => sum(qs, q => Q[q].e[i])), S_ = meses.map((_, i) => sum(qs, q => Q[q].s[i]));
+  let ac = base; const acum = meses.map((_, i) => (ac += E_[i] + geral[i] + S_[i]));
+  return { tipo: 'quadra', meses, proj: meses.map(proj), qs, Q, E_, S_, geral, acum, base };
+}
+function htmlHistorico(d) {
+  const f = v => Math.abs(v) < 0.5 ? '<span class="muted">–</span>' : brl(v);
+  if (d.tipo === 'destino') {
+    return `<div class="tbl-wrap"><table class="tbl dem hist-tab"><thead><tr><th class="l">R$</th><th>Consolidado</th>${d.cols.map((c, i) => `<th class="${d.proj[i] ? 'proj' : ''}">${esc(c)}${d.proj[i] ? '<small>projetado</small>' : ''}</th>`).join('')}</tr></thead><tbody>
+      ${d.rows.map(([n, tot, vs, s]) => `<tr class="dem-${s}"><td class="l">${esc(n.trim())}</td><td class="dem-tot ${tot === null ? '' : cls(tot)}">${tot === null ? '' : f(tot)}</td>${vs.map((v, i) => `<td class="${cls(v)} ${d.proj[i] ? 'proj' : ''}">${f(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  const porObra = !hfObra && variasObras();
+  const grupos = porObra ? E().obras.map(o => [o, d.qs.filter(q => obraDe(q) === o)]).filter(x => x[1].length) : [['', d.qs]];
+  const qOrd = grupos.flatMap(g => g[1]);
+  const tot = a => sum(a, x => x);
+  return `<div class="tbl-wrap"><table class="tbl dem hist-tab crono"><thead>
+    ${porObra ? `<tr><th class="l"></th><th colspan="4" class="grp">Consolidado</th>${grupos.map(([o, qs]) => `<th colspan="${qs.length * 2}" class="grp">${esc(o)}</th>`).join('')}</tr>` : ''}
+    <tr><th class="l"></th><th colspan="4" class="grp">${porObra ? '' : 'Consolidado'}</th>${qOrd.map(q => `<th colspan="2" class="grp q">${esc(q)}</th>`).join('')}</tr>
+    <tr><th class="l">Mês</th><th>Entradas</th><th title="Lançamentos sem quadra: aportes, administrativo e gerais">Geral / aportes</th><th>Saídas</th><th>Saldo acumulado</th>${qOrd.map(() => '<th>Entradas</th><th>Saídas</th>').join('')}</tr></thead><tbody>
+    ${d.meses.map((m, i) => `<tr class="${d.proj[i] ? 'proj' : ''}"><td class="l">${mesCurto(m)}${d.proj[i] ? ' <small class="muted">proj.</small>' : ''}</td><td class="pos">${f(d.E_[i])}</td><td class="${cls(d.geral[i])}">${f(d.geral[i])}</td><td class="neg">${f(d.S_[i])}</td><td class="dem-tot ${cls(d.acum[i])}"><b>${brl(d.acum[i])}</b></td>${qOrd.map(q => `<td class="pos">${f(d.Q[q].e[i])}</td><td class="neg">${f(d.Q[q].s[i])}</td>`).join('')}</tr>`).join('')}
+    <tr class="dem-grand"><td class="l">Total</td><td>${f(tot(d.E_))}</td><td>${f(tot(d.geral))}</td><td>${f(tot(d.S_))}</td><td class="dem-tot">${brl(d.acum[d.acum.length - 1] ?? d.base)}</td>${qOrd.map(q => `<td>${f(tot(d.Q[q].e))}</td><td>${f(tot(d.Q[q].s))}</td>`).join('')}</tr>
+    <tr class="dem-sub"><td class="l">Resultado da quadra</td><td colspan="4"></td>${qOrd.map(q => { const r = tot(d.Q[q].e) + tot(d.Q[q].s); return `<td colspan="2" class="${cls(r)}">${f(r)}</td>`; }).join('')}</tr>
+    </tbody></table></div>`;
+}
+VIEWS.movimento = {
+  titulo: 'Histórico financeiro',
+  refresh(el) {
+    if (hfEmp && !empPorId(hfEmp)) hfEmp = ''; if (hfObra && !E().obras.includes(hfObra)) hfObra = '';
+    const d = tabelaHistorico();
+    const todos = S.list.filter(pago).map(t => (t.pag || t.venc || '').slice(0, 7)).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+    const opMes = mesesEntre(todos[0] || hoje().slice(0, 7), hoje().slice(0, 7)).reverse().map(m => [m, mesCurto(m)]);
+    el.innerHTML = `<div class="filtros card">
+      ${variasEmpresas() ? `<label class="tgl">Empresa <select id="hE">${opts(empOpts(), hfEmp, 'Grupo consolidado')}</select></label>` : ''}
+      ${variasObras() ? `<label class="tgl">Obra <select id="hO">${opts(E().obras, hfObra, 'Todas as obras')}</select></label>` : ''}
+      <label class="tgl">De <select id="hI">${opts(opMes.slice().reverse(), hfIni)}</select></label><label class="tgl">até <select id="hF">${opts(opMes, hfFim)}</select></label>
+      <label class="tgl"><input type="checkbox" id="hP" ${hfProj ? 'checked' : ''}> Incluir projeção (contas em aberto)</label>
+      <button class="btn" id="hX">Exportar Excel</button></div>
+      <div class="seg">${[['destino', 'Por destino (Fluxo bancário)'], ['quadra', 'Por quadra (Cronograma)']].map(([v, l]) => `<button class="${v === hfAba ? 'on' : ''}" data-act="hfAba" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="card">${htmlHistorico(d)}
+      <p class="muted small">Realizado = o que foi pago ou recebido, no mês do pagamento, como nas abas Fluxo Bancário e Cronograma da planilha.${hfProj ? ' Meses marcados como projetado trazem as contas em aberto pelo vencimento (as vencidas entram no mês atual).' : ''} O saldo acumulado parte do saldo antes do primeiro mês${hfObra ? ' da obra (sem os saldos iniciais das contas)' : ''}.${d.tipo === 'quadra' ? ' "Geral / aportes" reúne os lançamentos sem quadra.' : ''}</p></div>`;
+    const on = (id, fn) => { const x = $('#' + id, el); if (x) x.onchange = e => { fn(e.target.type === 'checkbox' ? e.target.checked : e.target.value); this.refresh(el); }; };
+    on('hE', v => hfEmp = v); on('hO', v => hfObra = v); on('hI', v => { hfIni = v; if (hfFim < v) hfFim = v; }); on('hF', v => { hfFim = v; if (hfIni > v) hfIni = v; }); on('hP', v => hfProj = v);
+    $('#hX', el).onclick = () => exportarHistorico(d);
+  }
+};
+ACOES.hfAba = d => { hfAba = d.v; refreshView(); };
+function exportarHistorico(d) {
+  let aoa;
+  if (d.tipo === 'destino') aoa = [['R$', 'Consolidado', ...d.cols.map((c, i) => c + (d.proj[i] ? ' (proj.)' : ''))], ...d.rows.map(([n, tot, vs]) => [n.trim(), tot === null ? '' : r2(tot), ...vs.map(r2)])];
+  else aoa = [['Mês', 'Entradas', 'Geral / aportes', 'Saídas', 'Saldo acumulado', ...d.qs.flatMap(q => [q + ' entradas', q + ' saídas'])], ...d.meses.map((m, i) => [mesCurto(m) + (d.proj[i] ? ' (proj.)' : ''), r2(d.E_[i]), r2(d.geral[i]), r2(d.S_[i]), r2(d.acum[i]), ...d.qs.flatMap(q => [r2(d.Q[q].e[i]), r2(d.Q[q].s[i])])])];
+  const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 24 }, ...aoa[0].slice(1).map(() => ({ wch: 13 }))];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, d.tipo === 'destino' ? 'Fluxo bancário' : 'Cronograma');
+  baixarArquivo(new Blob([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `SFG Histórico ${d.tipo === 'destino' ? 'por destino' : 'por quadra'} ${hfIni} a ${hfFim}.xlsx`);
+}
+
+/* ---------- Fluxo do lote: etapas, dependências e tempos ---------- */
+const GRUPOS_FX = ['Terreno', 'Obra', 'Venda e repasse'];
+const FLUXO_PADRAO = [
+  ['t1', 'Escolha do terreno', 'Terreno', [], ''], ['t2', 'Contrato do terreno', 'Terreno', ['t1'], ''], ['t3', 'Declaração', 'Terreno', ['t2'], ''],
+  ['t4', 'IPTU', 'Terreno', ['t2'], ''], ['t5', 'CND IPTU', 'Terreno', ['t4'], 'CND IPTU'], ['t6', 'ITBI (antes do último pagamento)', 'Terreno', ['t2'], 'ITBI'],
+  ['t7', 'Taxa de escritura', 'Terreno', ['t2'], ''], ['t8', 'Autorização de escritura', 'Terreno', ['t2'], 'Autorização Escritura'], ['t9', 'Certidão (escritura)', 'Terreno', ['t2'], ''],
+  ['t10', 'Escritura', 'Terreno', ['t5', 't6', 't7', 't8', 't9'], 'Escritura'], ['t11', 'Registro da escritura', 'Terreno', ['t10'], 'Registro Escritura'],
+  ['o1', 'Escolha do construtor', 'Obra', [], ''], ['o2', 'Contrato do construtor', 'Obra', ['o1'], ''], ['o3', 'Projetos', 'Obra', ['o2'], 'Projetos'],
+  ['o4', 'ART', 'Obra', ['o3'], 'ART'], ['o5', 'Taxa ART', 'Obra', ['o4'], ''], ['o6', 'Licença de construção', 'Obra', ['o3', 'o5'], 'Licença de Construção'],
+  ['o7', 'Habite-se', 'Obra', ['o6'], 'Habite-se'], ['o8', 'Averbação do habite-se', 'Obra', ['o7'], 'Averbação Habite-se'], ['o9', 'ISS', 'Obra', ['o7'], 'ISS'], ['o10', 'SCPO', 'Obra', ['o9'], 'SCPO'],
+  ['v0', 'Cliente', 'Venda e repasse', [], ''], ['v1', 'Certidão', 'Venda e repasse', ['t11', 'o8'], 'Certidão Venda'], ['v2', 'Taxa de vistoria', 'Venda e repasse', ['v1'], 'Taxa Vistoria'],
+  ['v3', 'Avaliação', 'Venda e repasse', ['v2', 'v0'], ''], ['v4', 'Conformidade', 'Venda e repasse', ['v3'], ''], ['v5', 'Firmas', 'Venda e repasse', ['v4'], 'Firma'], ['v6', 'Buscas', 'Venda e repasse', ['v4'], 'Buscas'],
+  ['v7', 'Assinatura do contrato', 'Venda e repasse', ['v5', 'v6'], ''], ['v8', 'Prefeitura', 'Venda e repasse', ['v7'], ''], ['v9', 'Registro', 'Venda e repasse', ['v8'], ''],
+  ['v10', 'Digitalização', 'Venda e repasse', ['v9'], ''], ['v11', 'Corretagem', 'Venda e repasse', ['v10'], ''], ['v12', 'Termo de recebimento', 'Venda e repasse', ['v11'], 'Termo de Entrega']
+].map(([id, nome, grupo, dep, doc]) => ({ id, nome, grupo, dep, doc, prazo: 0 }));
+const etapasFx = () => { try { const e = S.fluxo && S.fluxo.etapas && JSON.parse(S.fluxo.etapas); if (Array.isArray(e) && e.length) return e; } catch (e) { /* padrão */ } return FLUXO_PADRAO; };
+const regLote = (q, l) => { try { return JSON.parse(((S.fluxo && S.fluxo.lotes) || {})[q + '|' + l] || '{}'); } catch (e) { return {}; } };
+const difDias = (a, b) => Math.round((new Date(b + 'T12:00') - new Date(a + 'T12:00')) / 864e5);
+function niveisFx(es) {
+  const by = Object.fromEntries(es.map(e => [e.id, e])), nv = {};
+  const f = (id, pilha = new Set()) => { if (nv[id] !== undefined) return nv[id]; if (pilha.has(id)) return 0; pilha.add(id); const e = by[id]; const ds = (e?.dep || []).filter(d => by[d]); nv[id] = ds.length ? 1 + Math.max(...ds.map(d => f(d, pilha))) : 0; return nv[id]; };
+  es.forEach(e => f(e.id)); return nv;
+}
+function ordemFx(es) { const nv = niveisFx(es); const g = x => { const i = GRUPOS_FX.indexOf(x.grupo); return i < 0 ? 99 : i; }; return es.slice().sort((a, b) => nv[a.id] - nv[b.id] || g(a) - g(b)); }
+/* Situação de cada etapa para um lote. */
+function estadoFx(q, l) {
+  const es = etapasFx(), reg = regLote(q, l), out = {}, h = hoje(); const docs = docsCk();
+  for (const e of ordemFx(es)) {
+    const r = reg[e.id] || {}; let f = r.f || '', ok = !!r.f, auto = false;
+    if (!ok && e.doc) { const i = docs.indexOf(e.doc); if (i >= 0) { const st = estadoDoc(q, l, i); if (st.feito) { ok = true; auto = true; f = st.arq ? st.arq.d : ''; } } }
+    const deps = (e.dep || []).map(d => out[d]).filter(Boolean); const depsOk = deps.every(d => d.ok);
+    const fimDeps = deps.map(d => d.f).filter(Boolean).sort().pop() || '';
+    const ini = r.i || (depsOk && deps.length ? fimDeps : '');
+    const dias = ok && f && ini ? Math.max(0, difDias(ini, f)) : null;
+    const corre = !ok && r.i ? difDias(r.i, h) : null;
+    const st = ok ? 'ok' : r.i ? 'andamento' : depsOk ? 'liberada' : 'bloqueada';
+    const atraso = !!(e.prazo && ((dias !== null && dias > e.prazo) || (corre !== null && corre > e.prazo)));
+    out[e.id] = { e, ok, f, i: r.i || '', ini, dias, corre, st, atraso, auto, o: r.o || '' };
+  }
+  return out;
+}
+const ST_FX = { ok: 'Concluída', andamento: 'Em andamento', liberada: 'Pode começar', bloqueada: 'Aguardando etapas anteriores' };
+let fxAba = 'mapa', fxQ = '', fxL = '', fxObra = '';
+function lotesFx() { const qs = (fxObra ? quadrasDaObra(fxObra) : E().quadras).filter(q => lotesDe(q).length); return (fxQ ? [fxQ] : qs).flatMap(q => lotesDe(q).map(l => [q, l])); }
+const mediana = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+function statsFx(lotes) {
+  const est = lotes.map(([q, l]) => [q, l, estadoFx(q, l)]); const o = {};
+  for (const e of etapasFx()) { const xs = est.map(x => x[2][e.id]); const ds = xs.map(x => x.dias).filter(x => x !== null); o[e.id] = { n: lotes.length, ok: xs.filter(x => x.ok).length, and: xs.filter(x => x.st === 'andamento').length, lib: xs.filter(x => x.st === 'liberada').length, atr: xs.filter(x => x.atraso).length, ds, med: ds.length ? sum(ds, x => x) / ds.length : null, mediana: mediana(ds), min: ds.length ? Math.min(...ds) : null, max: ds.length ? Math.max(...ds) : null }; }
+  return { est, o };
+}
+/* Desenho do fluxograma: colunas pela ordem das dependências, faixas por grupo. */
+function svgFx(info, acao) {
+  const es = etapasFx(), nv = niveisFx(es); const W = 164, H = 50, GX = 34, GY = 12, LX = 118, PAD = 14;
+  const grupos = [...GRUPOS_FX.filter(g => es.some(e => e.grupo === g)), ...[...new Set(es.map(e => e.grupo))].filter(g => !GRUPOS_FX.includes(g))];
+  const pos = {}; let y = PAD; const faixas = [];
+  for (const g of grupos) {
+    const ns = es.filter(e => e.grupo === g); const porNv = {}; ns.forEach(e => (porNv[nv[e.id]] = porNv[nv[e.id]] || []).push(e));
+    const linhas = Math.max(1, ...Object.values(porNv).map(a => a.length));
+    Object.entries(porNv).forEach(([n, a]) => a.forEach((e, i) => { pos[e.id] = { x: LX + (+n) * (W + GX), y: y + i * (H + GY) }; }));
+    const alt = linhas * (H + GY) - GY; faixas.push({ g, y: y - 8, h: alt + 16 }); y += alt + 30;
+  }
+  const larg = LX + (Math.max(0, ...Object.values(nv)) + 1) * (W + GX) + PAD, alt = y - 14;
+  const corta = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+  const setas = es.flatMap(e => (e.dep || []).filter(d => pos[d]).map(d => { const a = pos[d], b = pos[e.id]; const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x - 4, y2 = b.y + H / 2, mx = (x1 + x2) / 2; const ok = info(es.find(z => z.id === d))?.cls?.includes('ok'); return `<path class="fx-seta ${ok ? 'ok' : ''}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" marker-end="url(#fxSeta)"/>`; })).join('');
+  const nos = es.map(e => { const p = pos[e.id], i = info(e) || {}; return `<g class="fx-no ${i.cls || ''}" data-act="${acao}" data-id="${esc(e.id)}" tabindex="0" role="button" aria-label="${esc(e.nome + (i.sub ? ', ' + i.sub : ''))}"><title>${esc(e.nome + (i.sub ? ' — ' + i.sub : ''))}</title><rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="8"/><text x="${p.x + 10}" y="${p.y + 20}" class="fx-nome">${esc(corta(e.nome, e.doc ? 21 : 25))}</text><text x="${p.x + 10}" y="${p.y + 38}" class="fx-sub">${esc(corta(i.sub || '', 30))}</text>${e.doc ? `<text x="${p.x + W - 10}" y="${p.y + 20}" class="fx-doc" text-anchor="end">doc</text>` : ''}</g>`; }).join('');
+  return `<svg class="fx-svg" viewBox="0 0 ${larg} ${alt}" width="${larg}" height="${alt}" role="img" aria-label="Fluxograma das etapas"><defs><marker id="fxSeta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fx-ponta"/></marker></defs>
+    ${faixas.map((f, i) => `<rect class="fx-faixa ${i % 2 ? 'b' : ''}" x="0" y="${f.y}" width="${larg}" height="${f.h}"/><text class="fx-grupo" x="12" y="${f.y + 22}">${esc(f.g)}</text>`).join('')}${setas}${nos}</svg>`;
+}
+const fDias = v => v === null || v === undefined ? '—' : Math.round(v) + (Math.round(v) === 1 ? ' dia' : ' dias');
+VIEWS.etapas = {
+  titulo: a => a.length === 2 ? `Fluxo · quadra ${a[0]}, lote ${a[1]}` : 'Fluxo do lote',
+  refresh(el, a) {
+    if (a.length === 2) { fxQ = a[0]; fxL = a[1]; if (fxAba === 'tempos') fxAba = 'mapa'; }
+    if (fxObra && !E().obras.includes(fxObra)) fxObra = '';
+    const qs = (fxObra ? quadrasDaObra(fxObra) : E().quadras).filter(q => lotesDe(q).length); if (fxQ && !qs.includes(fxQ)) { fxQ = ''; fxL = ''; }
+    if (fxL && !lotesDe(fxQ).includes(fxL)) fxL = '';
+    const lotes = lotesFx(); const umLote = fxQ && fxL;
+    const est = umLote ? estadoFx(fxQ, fxL) : null; const S_ = umLote ? null : statsFx(lotes);
+    const info = e => { if (est) { const x = est[e.id]; return { cls: x.st + (x.atraso ? ' atraso' : ''), sub: x.ok ? (x.f ? 'concluída ' + dBR(x.f).slice(0, 5) + (x.dias !== null ? ' · ' + fDias(x.dias) : '') : 'concluída') : x.st === 'andamento' ? 'há ' + fDias(x.corre) : ST_FX[x.st].toLowerCase() }; }
+      const s = S_.o[e.id]; const pct = s.n ? s.ok / s.n : 0; return { cls: pct >= 1 ? 'ok' : s.ok || s.and ? 'andamento' : s.lib ? 'liberada' : 'bloqueada', sub: `${s.ok}/${s.n} lotes${s.med !== null ? ' · média ' + fDias(s.med) : ''}` }; };
+    const filtros = `<div class="filtros card">${variasObras() ? `<label class="tgl">Obra <select id="xO">${opts(E().obras, fxObra, 'Todas')}</select></label>` : ''}
+      <label class="tgl">Quadra <select id="xQ">${opts(qs, fxQ, 'Todas')}</select></label>
+      ${fxQ ? `<label class="tgl">Lote <select id="xL">${opts(lotesDe(fxQ), fxL, 'Todos os lotes')}</select></label>` : ''}
+      <button class="btn rw" data-act="fxEtapas">Editar etapas</button></div>
+      <div class="seg">${[['mapa', 'Fluxograma'], ['lote', 'Etapas do lote'], ['tempos', 'Tempos e comparação']].map(([v, l]) => `<button class="${v === fxAba ? 'on' : ''}" data-act="fxAba" data-v="${v}">${l}</button>`).join('')}</div>`;
+    let corpo = '';
+    if (fxAba === 'mapa') {
+      corpo = `<div class="card"><h2>${umLote ? `Quadra ${esc(fxQ)}, lote ${esc(fxL)}` : `${lotes.length} lote(s)${fxQ ? ' da quadra ' + esc(fxQ) : ''}`}</h2>
+        <p class="legenda-fx small"><span class="ok">concluída</span><span class="andamento">em andamento</span><span class="liberada">pode começar</span><span class="bloqueada">aguardando anteriores</span><span class="atraso">acima do prazo</span></p>
+        <div class="fx-wrap">${svgFx(info, umLote ? 'fxEd' : 'fxNo')}</div>
+        <p class="muted small">${umLote ? 'Toque numa etapa para registrar início e conclusão. Etapas ligadas a um documento do checklist (marca "doc") são concluídas sozinhas quando o documento entra no checklist ou no Drive.' : 'Escolha a quadra e o lote para registrar datas. Aqui cada etapa mostra quantos lotes já concluíram e o tempo médio.'}</p></div>`;
+    } else if (fxAba === 'lote') {
+      if (!umLote) corpo = `<div class="card"><p class="muted">Escolha a quadra e o lote acima.</p>${fxQ ? `<div class="chips">${lotesDe(fxQ).map(l => `<button class="chip" data-act="fxIr" data-q="${esc(fxQ)}" data-l="${esc(l)}">Lote ${esc(l)}</button>`).join('')}</div>` : ''}</div>`;
+      else {
+        const xs = ordemFx(etapasFx()).map(e => est[e.id]); const nOk = xs.filter(x => x.ok).length;
+        const ciclo = (() => { const ini = xs.map(x => x.i || (x.ok && x.f && !(x.e.dep || []).length ? x.f : '')).filter(Boolean).sort()[0]; const fim = xs.every(x => x.ok) ? xs.map(x => x.f).filter(Boolean).sort().pop() : ''; return ini ? (fim ? fDias(difDias(ini, fim)) + ' (concluído)' : fDias(difDias(ini, hoje())) + ' até agora') : '—'; })();
+        corpo = `<div class="grid kpis k4">${kpi('Etapas concluídas', `${nOk}/${xs.length}`, fPct.format(nOk / xs.length), '')}${kpi('Em andamento', xs.filter(x => x.st === 'andamento').length, '', '')}${kpi('Podem começar', xs.filter(x => x.st === 'liberada').length, '', '')}${kpi('Ciclo do lote', ciclo, 'da primeira etapa até agora', '')}</div>
+          <div class="card"><div class="tbl-wrap"><table class="tbl fx-tab"><thead><tr><th class="l">Etapa</th><th class="l">Situação</th><th class="l">Início</th><th class="l">Conclusão</th><th>Duração</th><th>Prazo</th><th></th></tr></thead><tbody>
+          ${GRUPOS_FX.concat([...new Set(xs.map(x => x.e.grupo))].filter(g => !GRUPOS_FX.includes(g))).map(g => { const gs = xs.filter(x => x.e.grupo === g); return gs.length ? `<tr class="dem-sub"><td class="l" colspan="7">${esc(g)}</td></tr>` + gs.map(x => `<tr class="${x.atraso ? 'atraso' : ''}"><td class="l">${esc(x.e.nome)}${x.e.doc ? ` <span class="muted small">· ${esc(x.e.doc)}</span>` : ''}</td><td class="l"><span class="chip fx-${x.st}">${ST_FX[x.st]}${x.auto ? ' (checklist)' : ''}</span></td><td class="l">${x.i ? dBR(x.i) : x.ini ? `<span class="muted">${dBR(x.ini)}</span>` : '—'}</td><td class="l">${x.f ? dBR(x.f) : x.ok ? 'sem data' : '—'}</td><td class="${x.atraso ? 'neg' : ''}">${x.ok ? fDias(x.dias) : x.corre !== null ? fDias(x.corre) + ' até agora' : '—'}</td><td>${x.e.prazo ? x.e.prazo + ' d' : '—'}</td><td><button class="btn sm rw" data-act="fxEd" data-id="${esc(x.e.id)}">Registrar</button></td></tr>`).join('') : ''; }).join('')}
+          </tbody></table></div><p class="muted small">Sem data de início, a duração conta a partir da conclusão da última etapa anterior (em cinza).</p></div>`;
+      }
+    } else {
+      const S2 = statsFx(lotes); const qsC = (fxQ ? [fxQ] : qs).slice(0, 10);
+      const porQ = Object.fromEntries(qsC.map(q => [q, statsFx(lotesDe(q).map(l => [q, l])).o]));
+      corpo = `<div class="card"><h2>Tempo por etapa <span class="muted small">${lotes.length} lote(s)</span></h2><div class="tbl-wrap"><table class="tbl fx-tab"><thead><tr><th class="l">Etapa</th><th>Concluídos</th><th>Média</th><th>Mediana</th><th>Mais rápido</th><th>Mais lento</th><th>Prazo</th><th>Acima do prazo</th>${qsC.length > 1 ? qsC.map(q => `<th>Média ${esc(q)}</th>`).join('') : ''}</tr></thead><tbody>
+        ${ordemFx(etapasFx()).map(e => { const s = S2.o[e.id]; return `<tr><td class="l">${esc(e.nome)} <span class="muted small">${esc(e.grupo)}</span></td><td>${s.ok}/${s.n}</td><td>${fDias(s.med)}</td><td>${fDias(s.mediana)}</td><td>${fDias(s.min)}</td><td>${fDias(s.max)}</td><td>${e.prazo ? e.prazo + ' d' : '—'}</td><td class="${s.atr ? 'neg' : ''}">${s.atr || '—'}</td>${qsC.length > 1 ? qsC.map(q => `<td>${fDias(porQ[q][e.id].med)}</td>`).join('') : ''}</tr>`; }).join('')}</tbody></table></div>
+        <p class="muted small">A duração de cada etapa vai da data de início (ou da conclusão da etapa anterior) até a conclusão, em dias corridos. Só entram etapas concluídas com data. Use o filtro de obra e quadra para comparar empreendimentos.</p></div>`;
+    }
+    el.innerHTML = filtros + corpo;
+    const on = (id, fn) => { const x = $('#' + id, el); if (x) x.onchange = e => { fn(e.target.value); if (location.hash.split('/').length > 2) location.hash = '#/etapas'; else this.refresh(el, []); }; };
+    on('xO', v => { fxObra = v; fxQ = ''; fxL = ''; }); on('xQ', v => { fxQ = v; fxL = ''; }); on('xL', v => { fxL = v; if (v && fxAba === 'tempos') fxAba = 'mapa'; });
+  }
+};
+ACOES.fxAba = d => { fxAba = d.v; refreshView(); };
+ACOES.fxIr = d => { fxQ = d.q; fxL = d.l; refreshView(); };
+ACOES.fxNo = d => {
+  const e = etapasFx().find(x => x.id === d.id); if (!e) return; const ls = lotesFx();
+  const xs = ls.map(([q, l]) => [q, l, estadoFx(q, l)[e.id]]);
+  folha(e.nome, `<p class="muted small">${esc(e.grupo)}${(e.dep || []).length ? ' · depois de ' + esc(e.dep.map(x => etapasFx().find(z => z.id === x)?.nome).filter(Boolean).join(', ')) : ''}${e.prazo ? ' · prazo ' + e.prazo + ' dias' : ''}</p>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Lote</th><th class="l">Situação</th><th class="l">Conclusão</th><th>Duração</th></tr></thead><tbody>${xs.map(([q, l, x]) => `<tr class="click" data-act="fxIrLote" data-q="${esc(q)}" data-l="${esc(l)}"><td class="l">${esc(q)} · ${esc(l)}</td><td class="l"><span class="chip fx-${x.st}">${ST_FX[x.st]}</span></td><td class="l">${x.f ? dBR(x.f) : '—'}</td><td class="${x.atraso ? 'neg' : ''}">${x.ok ? fDias(x.dias) : x.corre !== null ? fDias(x.corre) + ' até agora' : '—'}</td></tr>`).join('')}</tbody></table></div>`, { largo: true });
+};
+ACOES.fxIrLote = d => { document.querySelector('.sheet [data-close]')?.click(); location.hash = '#/etapas/' + encodeURIComponent(d.q) + '/' + encodeURIComponent(d.l); };
+function salvarRegLote(q, l, reg) { const k = q + '|' + l; S.fluxo = S.fluxo || {}; S.fluxo.lotes = { ...(S.fluxo.lotes || {}), [k]: JSON.stringify(reg) }; gravar(doc(db, 'config', 'fluxo'), { lotes: { [k]: JSON.stringify(reg) } }, { merge: true }).catch(onErroEscrita); }
+ACOES.fxEd = d => {
+  const q = fxQ, l = fxL; if (!q || !l) return; const e = etapasFx().find(x => x.id === d.id); if (!e) return;
+  const x = estadoFx(q, l)[e.id]; const r = regLote(q, l)[e.id] || {};
+  const f = folha(e.nome, `<form class="form" id="fx"><p class="muted small">Quadra ${esc(q)}, lote ${esc(l)} · ${esc(e.grupo)} · ${ST_FX[x.st]}${x.auto ? ' pelo checklist' : ''}${(e.dep || []).length ? '<br>Depois de: ' + esc(e.dep.map(z => etapasFx().find(w => w.id === z)?.nome).filter(Boolean).join(', ')) : ''}</p>
+    <div class="g2"><label>Início (solicitação)<input type="date" name="i" value="${esc(r.i || '')}"></label><label>Conclusão<input type="date" name="f" value="${esc(r.f || '')}"></label></div>
+    <div class="acts left"><button type="button" class="btn sm" id="hI">Começou hoje</button><button type="button" class="btn sm" id="hF">Concluiu hoje</button></div>
+    <label>Observação<input name="o" value="${esc(r.o || '')}" placeholder="Ex.: protocolo 1234, aguardando cartório"></label>
+    <label class="chk"><input type="checkbox" name="todos"> Aplicar a todos os lotes da quadra ${esc(q)}</label>
+    <label class="chk"><input type="checkbox" name="soVazios" checked> Só nos lotes que ainda não têm data nesta etapa</label>
+    <div class="acts"><button type="button" class="btn danger ghost" id="lim">Limpar datas</button><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
+  const F = f.el.querySelector('#fx');
+  F.querySelector('#hI').onclick = () => { F.i.value = hoje(); }; F.querySelector('#hF').onclick = () => { F.f.value = hoje(); if (!F.i.value && !x.ini) F.i.value = hoje(); };
+  const aplica = val => { const alvos = F.todos.checked ? lotesDe(q) : [l]; let n = 0; for (const lt of alvos) { const reg = regLote(q, lt); if (F.todos.checked && F.soVazios.checked && lt !== l && (reg[e.id]?.i || reg[e.id]?.f)) continue; if (val) reg[e.id] = val; else delete reg[e.id]; salvarRegLote(q, lt, reg); n++; } return n; };
+  F.querySelector('#lim').onclick = () => { const n = aplica(null); f.fechar(); refreshView(); toast(n > 1 ? `Datas limpas em ${n} lotes` : 'Datas limpas'); };
+  F.onsubmit = ev => { ev.preventDefault(); if (F.i.value && F.f.value && F.f.value < F.i.value) { toast('A conclusão é anterior ao início.', 'err'); return; } const v = {}; if (F.i.value) v.i = F.i.value; if (F.f.value) v.f = F.f.value; if (F.o.value.trim()) v.o = F.o.value.trim(); const n = aplica(Object.keys(v).length ? v : null); f.fechar(); refreshView(); toast(n > 1 ? `Etapa salva em ${n} lotes` : 'Etapa salva'); };
+};
+function salvarEtapas(es) { S.fluxo = { ...(S.fluxo || {}), etapas: JSON.stringify(es) }; gravar(doc(db, 'config', 'fluxo'), { etapas: S.fluxo.etapas }, { merge: true }).catch(onErroEscrita); refreshView(); }
+function temCiclo(es) { const by = Object.fromEntries(es.map(e => [e.id, e])); const vis = {}; const dfs = id => { if (vis[id] === 1) return true; if (vis[id] === 2) return false; vis[id] = 1; for (const d of (by[id]?.dep || [])) if (by[d] && dfs(d)) return true; vis[id] = 2; return false; }; return es.some(e => dfs(e.id)); }
+ACOES.fxEtapas = () => {
+  const es = etapasFx();
+  const f = folha('Etapas do fluxo', `<p class="muted small">Defina as etapas, de quais outras cada uma depende, o prazo esperado e, se quiser, o documento do checklist que conclui a etapa sozinho.</p>
+    ${GRUPOS_FX.concat([...new Set(es.map(e => e.grupo))].filter(g => !GRUPOS_FX.includes(g))).map(g => { const gs = ordemFx(es).filter(e => e.grupo === g); return gs.length ? `<div class="lbl">${esc(g)}</div><div class="chips" style="margin-bottom:10px">${gs.map(e => `<button class="chip" data-act="fxEtapa" data-id="${esc(e.id)}">${esc(e.nome)}${e.prazo ? ' · ' + e.prazo + ' d' : ''}</button>`).join('')}</div>` : ''; }).join('')}
+    <div class="acts"><button class="btn ghost" data-act="fxPadrao">Voltar ao modelo padrão</button><button class="btn primary" data-act="fxEtapa">Nova etapa</button></div>`, { largo: true });
+  f.el.addEventListener('click', ev => { if (ev.target.closest('[data-act="fxEtapa"],[data-act="fxPadrao"]')) f.fechar(); });
+};
+ACOES.fxPadrao = async () => { if (await confirmar('Voltar as etapas ao modelo padrão (baseado na aba Fluxograma da planilha)? As datas já registradas nos lotes continuam guardadas.', 'Voltar ao padrão', false)) salvarEtapas(FLUXO_PADRAO); };
+ACOES.fxEtapa = d => {
+  const es = etapasFx(); const e = d.id ? es.find(x => x.id === d.id) : null;
+  const grupos = [...new Set([...GRUPOS_FX, ...es.map(x => x.grupo)])];
+  const f = folha(e ? e.nome : 'Nova etapa', `<form class="form" id="fx"><label>Nome<input name="nome" required value="${esc(e?.nome || '')}"></label>
+    <div class="g2"><label>Grupo<input name="grupo" list="dlGr" required value="${esc(e?.grupo || GRUPOS_FX[0])}"><datalist id="dlGr">${grupos.map(g => `<option value="${esc(g)}">`).join('')}</datalist></label><label>Prazo esperado (dias)<input name="prazo" type="number" min="0" inputmode="numeric" value="${e?.prazo || ''}" placeholder="opcional"></label></div>
+    <label>Concluída automaticamente pelo documento do checklist<select name="doc">${opts(docsCk(), e?.doc || '', 'Nenhum')}</select></label>
+    <div class="lbl">Depende de</div><div class="chips fx-deps">${ordemFx(es).filter(x => !e || x.id !== e.id).map(x => `<label class="chip"><input type="checkbox" name="dep" value="${esc(x.id)}" ${e && (e.dep || []).includes(x.id) ? 'checked' : ''}> ${esc(x.nome)}</label>`).join('')}</div>
+    <div class="acts">${e ? '<button type="button" class="btn danger ghost" id="rm">Excluir etapa</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`, { largo: true });
+  const F = f.el.querySelector('#fx');
+  F.onsubmit = ev => {
+    ev.preventDefault(); const n = { id: e ? e.id : 'e' + uid().slice(-6), nome: F.nome.value.trim(), grupo: F.grupo.value.trim() || 'Outros', prazo: +F.prazo.value || 0, doc: F.doc.value, dep: $$('[name=dep]:checked', F).map(c => c.value) };
+    const nova = e ? es.map(x => x.id === e.id ? n : x) : [...es, n];
+    if (temCiclo(nova)) { toast('Essa dependência cria um ciclo (uma etapa dependeria dela mesma).', 'err'); return; }
+    salvarEtapas(nova); f.fechar(); toast('Etapa salva');
+  };
+  const rm = F.querySelector('#rm'); if (rm) rm.onclick = async () => { if (await confirmar(`Excluir a etapa <b>${esc(e.nome)}</b>? As etapas que dependiam dela passam a depender das anteriores a ela.`, 'Excluir')) { const nova = es.filter(x => x.id !== e.id).map(x => (x.dep || []).includes(e.id) ? { ...x, dep: [...new Set([...x.dep.filter(z => z !== e.id), ...(e.dep || [])])] } : x); salvarEtapas(nova); f.fechar(); } };
+};
+
 /* ---------- Contas recorrentes ---------- */
 const FREQ = [['1', 'Mensal'], ['2', 'Bimestral'], ['3', 'Trimestral'], ['6', 'Semestral'], ['12', 'Anual']];
 const HORIZ_REC = 6;
