@@ -299,7 +299,7 @@ function telaLogin(msg) {
 function montarShell() {
   document.body.innerHTML = `<div class="app">
     <aside class="side"><div class="brand"><img class="logo-img" src="${LOGO_BRANCO}" alt=""><div><b>SFG</b><small>INCORPORADORA</small></div></div>
-      <nav>${NAV.map(([k, n]) => k === '#' ? `<div class="sec">${n.toUpperCase()}</div>` : `<a href="#/${k}" data-nav="${k}">${ic(k, 18)}<span>${n}</span></a>`).join('')}</nav>
+      <nav>${NAV.map(([k, n]) => k === '#' ? `<div class="sec">${n}</div>` : `<a href="#/${k}" data-nav="${k}">${ic(k, 18)}<span>${n}</span></a>`).join('')}</nav>
       <div class="side-foot"><span id="sideUser" class="muted"></span></div></aside>
     <div class="main">
       <header class="top"><button class="icon-btn back hidden" id="btnBack" aria-label="Voltar">${ic('voltar')}</button><img class="tlogo" src="${LOGO_BRANCO}" alt="SFG"><h1 id="title"></h1><span id="sync" class="sync"></span><button class="btn primary desk rw" data-act="novo">${ic('plus', 18)} Novo lançamento</button></header>
@@ -580,13 +580,13 @@ const listaSel = new Set();
 function linhaTitulo(t, o = {}) {
   const h = hoje(); const venc = !pago(t) && t.venc < h; const hj = !pago(t) && t.venc === h;
   const d = o.data === 'pag' ? (t.pag || t.venc) : t.venc;
-  const meta = [t.quadra && t.quadra !== '-' ? t.quadra + (t.lote && t.lote !== '-' ? ' · ' + t.lote : '') : 'Geral', t.destino, t.forn, t.nf ? 'NF' : '', t.anexo ? '📎' : ''].filter(Boolean).map(esc).join(' · ');
+  const meta = `<span class="loc">${esc(t.quadra && t.quadra !== '-' ? t.quadra + (t.lote && t.lote !== '-' ? ' ' + t.lote : '') : 'Geral')}</span>` + [t.destino, t.forn, t.nf ? 'com NF' : '', t.anexo ? 'anexo' : ''].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('');
   return `<div class="tr ${o.sel ? 'selmode' : ''} ${listaSel.has(t.id) ? 'sel' : ''}" data-act="${o.sel ? 'tsel' : 'abrir'}" data-id="${t.id}">
     ${o.sel ? `<span class="cb">${listaSel.has(t.id) ? '✓' : ''}</span>` : ''}
-    <div class="td-date"><b>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '—'}</b><small>${d ? d.slice(0, 4) : ''}</small></div>
+    ${o.semData ? '' : `<div class="td-date"><b>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '—'}</b><small>${d ? d.slice(0, 4) : ''}</small></div>`}
     <div class="td-main"><div class="td-item">${esc(t.item)}</div><div class="td-meta">${meta}</div></div>
     <div class="td-val"><b class="${cls(t.valor)}">${brl2(t.valor)}</b>${t.juros ? `<small class="neg">juros ${brl2(t.juros)}</small>` : ''}${o.saldo !== undefined ? `<small class="muted">saldo ${brl(o.saldo)}</small>` : ''}
-      ${!pago(t) ? (venc ? '<span class="chip bad">vencida</span>' : hj ? '<span class="chip warn">hoje</span>' : '') : (o.mostrarPago ? '<span class="chip ok">pago</span>' : '')}</div>
+      ${o.semData ? '' : !pago(t) ? (venc ? '<span class="chip bad">vencida</span>' : hj ? '<span class="chip warn">hoje</span>' : '') : (o.mostrarPago ? '<span class="chip ok">pago</span>' : '')}</div>
     ${o.baixa && !pago(t) ? `<button class="btn sm" data-act="baixar" data-id="${t.id}">Baixar</button>` : ''}
   </div>`;
 }
@@ -615,10 +615,10 @@ function linhaGrupo(g, o = {}) {
   const allSel = ids.every(id => listaSel.has(id));
   return `<div class="tr grp ${o.sel ? 'selmode' : ''} ${o.sel && allSel ? 'sel' : ''}" data-act="${o.sel ? 'gsel' : 'grp'}" data-ids="${ids.join(',')}">
     ${o.sel ? `<span class="cb">${allSel ? '✓' : ''}</span>` : ''}
-    <div class="td-date"><b>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '—'}</b><small>${d ? d.slice(0, 4) : ''}</small></div>
-    <div class="td-main"><div class="td-item">${esc(baseItem(t))} <span class="chip">${g.itens.length} lotes</span></div><div class="td-meta">${esc(t.quadra)} · lotes ${esc(ls.length > 8 ? ls.slice(0, 8).join(', ') + '…' : ls.join(', '))} · ${esc(t.destino)}</div></div>
+    ${o.semData ? '' : `<div class="td-date"><b>${d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '—'}</b><small>${d ? d.slice(0, 4) : ''}</small></div>`}
+    <div class="td-main"><div class="td-item">${esc(baseItem(t))} <span class="chip">${g.itens.length} lotes</span></div><div class="td-meta"><span class="loc">${esc(t.quadra)}</span><span>lotes ${esc(ls.length > 8 ? ls.slice(0, 8).join(', ') + '…' : ls.join(', '))}</span><span>${esc(t.destino)}</span></div></div>
     <div class="td-val"><b class="${cls(tot)}">${brl2(tot)}</b>${jur ? `<small class="neg">juros ${brl2(jur)}</small>` : ''}<small class="muted">${g.itens.length} × ${brl2(t.valor)}</small>
-      ${!pago(t) ? (venc ? '<span class="chip bad">vencida</span>' : hj ? '<span class="chip warn">hoje</span>' : '') : (o.mostrarPago ? '<span class="chip ok">pago</span>' : '')}</div>
+      ${o.semData ? '' : !pago(t) ? (venc ? '<span class="chip bad">vencida</span>' : hj ? '<span class="chip warn">hoje</span>' : '') : (o.mostrarPago ? '<span class="chip ok">pago</span>' : '')}</div>
     ${o.baixa && !pago(t) ? `<button class="btn sm" data-act="baixarG" data-ids="${ids.join(',')}">Baixar</button>` : ''}
   </div>`;
 }
@@ -659,41 +659,69 @@ function graficoSaldo(id, dias, limite) {
    ========================================================= */
 const VIEWS = {};
 
+/* ---------- Linha d'água do caixa (assinatura do Início) ---------- */
+function linhaDagua(pj, horizonte) {
+  const h = hoje(), fim = addDays(h, horizonte);
+  const ds = pj.dias.filter(x => x.d <= fim); if (!ds.length) return '';
+  const idx = d => Math.max(0, Math.round((new Date(d + 'T12:00') - new Date(h + 'T12:00')) / 864e5));
+  const vals = ds.map(x => x.v); const vmin = Math.min(0, ...vals), vmax = Math.max(0, ...vals);
+  const pad = (vmax - vmin) * 0.1 || 1; const lo = vmin - pad, hi = vmax + pad;
+  const X = i => i / horizonte * 1000, Y = v => 200 - (v - lo) / (hi - lo) * 200, y0 = Y(0);
+  let d = `M0,${Y(ds[0].v).toFixed(1)}`;
+  for (let k = 1; k < ds.length; k++) d += ` H${X(idx(ds[k].d)).toFixed(1)} V${Y(ds[k].v).toFixed(1)}`;
+  d += ' H1000';
+  const area = d + ` V${y0.toFixed(1)} H0 Z`;
+  let mn = ds[0]; for (const x of ds) if (x.v < mn.v) mn = x;
+  const mx = X(idx(mn.d)) / 10, my = Y(mn.v) / 2;
+  const meses = []; let m = addMonths(h.slice(0, 7) + '-01', 1);
+  while (m <= fim) { if (X(idx(m)) / 10 > 7) meses.push(`<span class="agua-mes" style="left:${X(idx(m)) / 10}%">${MES3[+m.slice(5, 7) - 1]}</span>`); m = addMonths(m, 1); }
+  return `<div class="agua" role="img" aria-label="Saldo projetado dos próximos ${horizonte} dias. Menor saldo ${brl(mn.v)} em ${dBR(mn.d)}.">
+    <svg viewBox="0 0 1000 200" preserveAspectRatio="none" aria-hidden="true">
+      <defs><clipPath id="aguaCima"><rect x="0" y="0" width="1000" height="${y0.toFixed(1)}"/></clipPath><clipPath id="aguaBaixo"><rect x="0" y="${y0.toFixed(1)}" width="1000" height="${(200 - y0).toFixed(1)}"/></clipPath></defs>
+      <path d="${area}" class="agua-pos" clip-path="url(#aguaCima)"/><path d="${area}" class="agua-neg" clip-path="url(#aguaBaixo)"/>
+      <line x1="0" x2="1000" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}" class="agua-zero" vector-effect="non-scaling-stroke"/>
+      <path d="${d}" class="agua-linha" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <span class="agua-zero-lab" style="top:${y0 / 2}%">zero</span>
+    <span class="agua-ponto" style="left:${mx}%;top:${my}%"></span>
+    <span class="agua-nota ${mx > 52 ? 'esq' : ''}" style="left:${mx}%;top:${my}%">Menor saldo <b>${brl(mn.v)}</b> em ${dBR(mn.d).slice(0, 5)}</span>
+    <div class="agua-meses"><span class="agua-mes" style="left:0">hoje</span>${meses.join('')}</div>
+  </div>`;
+}
+
 VIEWS.inicio = {
   titulo: 'Início',
   refresh(el) {
     const h = hoje(), L = S.list, ab = L.filter(t => !pago(t));
-    if (!L.length && !S.estrutura) { el.innerHTML = `<div class="empty card"><h2>Bem-vindo!</h2><p>O sistema está vazio. Para começar, importe sua planilha <b>SFG Projeto</b> com todo o histórico.</p><a class="btn primary" href="#/dados">Importar planilha</a></div>`; return; }
+    if (!L.length && !S.estrutura) { el.innerHTML = `<div class="vazio"><img src="${LOGO_COMPLETO}" alt="" width="180"><h2>Comece importando o histórico</h2><p>Traga a planilha SFG Projeto para o sistema e todos os lançamentos, quadras e o orçamento aparecem aqui.</p><a class="btn primary" href="#/dados">Importar planilha</a></div>`; return; }
     const sd = saldos(), pj = projecao();
     const venc = ab.filter(t => t.valor < 0 && t.venc < h), p7 = ab.filter(t => t.valor < 0 && t.venc >= h && t.venc <= addDays(h, 7)), r30 = ab.filter(t => t.valor > 0 && t.venc <= addDays(h, 30));
-    const prox = ab.filter(t => t.venc <= addDays(h, 14)).sort((a, b) => a.venc.localeCompare(b.venc) || a.valor - b.valor);
     const neg = pj.dias.find(x => x.v < 0);
-    const r30txt = r30.length ? [...new Set(r30.map(t => t.quadra + (t.lote && t.lote !== '-' ? ' · ' + t.lote : '')))].slice(0, 2).join(', ') : 'nada previsto';
-    const vencDesde = venc.length ? venc.map(t => t.venc).sort()[0] : '';
-    // saldo no fim de cada mês
-    const meses = []; let m0 = h.slice(0, 7) + '-01';
-    for (let i = 0; i < 8; i++) { const ini = addMonths(m0, i); const fim = addDays(addMonths(ini, 1), -1); let v = pj.base; for (const x of pj.dias) if (x.d <= fim) v = x.v; meses.push({ k: ini.slice(0, 7), v }); }
+    const dataLonga = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+    const prox = ab.filter(t => t.venc <= addDays(h, 10)).sort((a, b) => a.venc.localeCompare(b.venc) || a.valor - b.valor);
+    const dias = []; for (const t of prox) { const k = t.venc < h ? 'vencidas' : t.venc; let g = dias.find(x => x.k === k); if (!g) { g = { k, ts: [] }; dias.push(g); } g.ts.push(t); }
+    const nomeDia = k => k === 'vencidas' ? 'Vencidas' : k === h ? 'Hoje' : k === addDays(h, 1) ? 'Amanhã' : new Date(k + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'short' });
+    let restam = 12;
+    const agenda = dias.map(g => { if (restam <= 0) return ''; const es = agrupar(g.ts, 'venc').slice(0, restam); restam -= es.length; const tot = sum(g.ts, t => t.valor);
+      return `<div class="ag-dia"><h3 class="${g.k === 'vencidas' ? 'neg' : ''}"><span>${nomeDia(g.k)}</span><span class="fig ${cls(tot)}">${brl(tot)}</span></h3>${es.map(e => linhaEntrada(e, { baixa: true, semData: true })).join('')}</div>`; }).join('');
     const qs = E().quadras.map(resumoQuadra).sort((a, b) => b.proj - a.proj); const qmax = Math.max(1, ...qs.map(q => Math.abs(q.proj)));
-    const hora = new Date().getHours(); const saud = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
-    const nome = (S.user?.displayName || '').split(' ')[0] || ((S.user?.email || '').startsWith('luis') ? 'Luis' : '');
-    el.innerHTML = `<div class="eyebrow">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-    <h2 class="saud">${saud}${nome ? ', ' + esc(nome) : ''}</h2>
-    <div class="grid kpis k4">
-      <div class="card kpi hero click" data-act="ir" data-href="#/extrato"><div class="lab">Saldo em caixa</div><div class="val">${brl(sd.total)}</div><div class="sub">${sd.contas.map(c => esc(c.nome) + ' ' + brl(c.saldo)).join(' · ')}</div></div>
-      ${kpi('Vencidas a pagar', brl(sum(venc, t => t.valor)), venc.length ? venc.length + ' conta(s) · desde ' + dBR(vencDesde).slice(0, 5) : 'nenhuma', venc.length ? 'neg' : '', '#/pagar')}
-      ${kpi('A pagar em 7 dias', brl(sum(p7, t => t.valor)), p7.length + ' lançamento(s)', '', '#/pagar')}
-      ${kpi('A receber em 30 dias', brl(sum(r30, t => t.valor)), esc(r30txt), 'pos', '#/receber')}
-    </div>
-    ${neg ? `<div class="alerta-caixa">${ic('fluxo', 20)}<span>O caixa fica negativo a partir de <b>${dBR(neg.d).slice(0, 5)}</b> e chega a <b>${brl(pj.min.v)}</b> em <b>${dBR(pj.min.d).slice(0, 5)}</b>. Planeje um aporte ou antecipe recebíveis.</span><a class="btn link" href="#/fluxo">Ver fluxo</a></div>` : ''}
-    <div class="grid lg">
-      <div class="card"><h2>Saldo projetado <span class="hint">fim de cada mês · contas a pagar e a receber</span></h2><div class="chartbox"><canvas id="cIniM"></canvas></div></div>
-      <div class="card"><h2>Resultado projetado por quadra</h2>${qs.map(q => `<a class="qbar" href="#/obras/${encodeURIComponent(q.q)}"><b>${esc(q.q)}</b><span class="bar"><i style="width:${Math.max(0, q.proj) / qmax * 100}%"></i></span><span style="text-align:right" class="${cls(q.proj)}">${short(q.proj)}</span></a>`).join('')}
-        <p class="muted small" style="border-top:1px solid var(--line);padding-top:10px;margin:10px 0 0">Total projetado <b style="color:var(--ink)">${short(sum(qs, q => q.proj))}</b> · previsto ${short(sum(qs, q => q.prevRes))}</p></div>
-    </div>
-    <div class="card"><h2>Próximos vencimentos <span class="hint">14 dias, inclui vencidas</span><button class="btn sm" data-act="ics">${ic('calendario', 16)} Lembretes no calendário</button></h2><div class="tlist">${(() => { const g = agrupar(prox, 'venc'); return g.slice(0, 15).map(e => linhaEntrada(e, { baixa: true })).join('') + (g.length > 15 ? `<a class="btn link" href="#/pagar">Ver todos (${prox.length} lançamentos)</a>` : ''); })() || '<p class="muted">Nada vencendo.</p>'}</div></div>`;
-    grafico('cIniM', { type: 'bar', data: { labels: meses.map(x => MES3[+x.k.slice(5, 7) - 1] + '/' + x.k.slice(2, 4)), datasets: [{ data: meses.map(x => x.v), backgroundColor: meses.map(x => x.v < 0 ? css('--out') : css('--bal')), borderRadius: 6, maxBarThickness: 46 }] },
-      options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => brl(c.parsed.y) } } },
-        scales: { x: { ticks: { color: css('--muted') }, grid: { display: false } }, y: { ticks: { color: css('--muted'), callback: v => short(v), maxTicksLimit: 6 }, grid: { color: css('--line') } } } } });
+    el.innerHTML = `<section class="extrato-hero">
+      <div class="eh-topo">
+        <div class="eh-saldo"><p class="eh-lab">Saldo em caixa, ${esc(dataLonga)}</p><p class="eh-val fig ${sd.total < 0 ? 'neg' : ''}">${brl(sd.total)}</p>
+          <p class="eh-contas">${sd.contas.map(c => `<span>${esc(c.nome)} <b class="fig">${brl(c.saldo)}</b></span>`).join('')}</p></div>
+        <div class="eh-fatos">
+          <a href="#/pagar"><span class="k">Vencido a pagar</span><span class="v fig ${venc.length ? 'neg' : ''}">${brl(sum(venc, t => t.valor))}</span><small>${venc.length ? venc.length + ' conta(s) em atraso' : 'nada em atraso'}</small></a>
+          <a href="#/pagar"><span class="k">Sai nos próximos 7 dias</span><span class="v fig">${brl(sum(p7, t => t.valor))}</span><small>${p7.length} lançamento(s)</small></a>
+          <a href="#/receber"><span class="k">Entra nos próximos 30 dias</span><span class="v fig pos">${brl(sum(r30, t => t.valor))}</span><small>${r30.length} recebimento(s)</small></a>
+        </div>
+      </div>
+      <div class="eh-agua"><div class="eh-agua-cab"><h2>Caixa nos próximos 120 dias</h2>${neg ? `<p class="aviso">Fica negativo em ${dBR(neg.d).slice(0, 5)} e chega a <b class="fig">${brl(pj.min.v)}</b> em ${dBR(pj.min.d).slice(0, 5)}. Planeje um aporte ou antecipe recebíveis.</p>` : '<p class="muted">O saldo projetado não fica negativo nesse período.</p>'}<a class="btn link" href="#/fluxo">Abrir fluxo de caixa</a></div>${linhaDagua(pj, 120)}</div>
+    </section>
+    <div class="dupla">
+      <section class="painel"><div class="painel-cab"><h2>Vencimentos</h2><button class="btn sm" data-act="ics">${ic('calendario', 16)} Lembretes no calendário</button></div>${agenda || '<p class="muted pad">Nada vencendo nos próximos dias.</p>'}<a class="btn link" href="#/pagar">Ver todas as contas a pagar</a></section>
+      <section class="painel"><div class="painel-cab"><h2>Resultado projetado por quadra</h2></div>${qs.map(q => `<a class="qbar" href="#/obras/${encodeURIComponent(q.q)}"><b>${esc(q.q)}</b><span class="bar"><i style="width:${Math.max(0, q.proj) / qmax * 100}%"></i></span><span class="fig ${cls(q.proj)}">${short(q.proj)}</span></a>`).join('')}
+        <p class="painel-rodape">Total projetado <b class="fig">${short(sum(qs, q => q.proj))}</b>, previsto ${short(sum(qs, q => q.prevRes))}</p></section>
+    </div>`;
   }
 };
 
@@ -793,15 +821,25 @@ function pctBar(p, custo) {
   return `<span class="pbar"><span class="bar"><i style="width:${Math.min(100, p * 100)}%;${over ? 'background:var(--out)' : ''}"></i></span><span>${fPct.format(p)}</span></span>`;
 }
 VIEWS.obras = {
-  titulo: a => a.length === 2 ? `Lote ${a[0]} · ${a[1]}` : a.length === 1 ? 'Quadra ' + a[0] : 'Obras · ' + E().local,
+  titulo: a => a.length === 2 ? `Quadra ${a[0]}, lote ${a[1]}` : a.length === 1 ? 'Quadra ' + a[0] : 'Quadras e lotes',
   refresh(el, a) { if (a.length === 2) return obraLote(el, a[0], a[1]); if (a.length === 1) return obraQuadra(el, a[0]); return obrasResumo(el); }
 };
 function obrasResumo(el) {
   const rows = E().quadras.map(resumoQuadra); const T = k => sum(rows, r => r[k]);
-  el.innerHTML = `<div class="grid kpis">${kpi('Lotes', T('n'), E().quadras.length + ' quadras', '')}${kpi('Custo realizado', brl(T('custo')), '', 'neg')}${kpi('A pagar', brl(T('pagar')), '', 'neg')}${kpi('Receita realizada', brl(T('receita')), '', 'pos')}${kpi('A receber', brl(T('receber')), '', 'pos')}${kpi('Resultado projetado', brl(T('proj')), 'previsto ' + brl(T('prevRes')), cls(T('proj')))}</div>
-  <div class="card"><h2>Quadras <span class="hint">toque para abrir</span></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th>Lotes</th><th>Custo realizado</th><th>A pagar</th><th>Receita</th><th>A receber</th><th>Resultado projetado</th><th>Previsto</th><th>Custo vs orçado</th><th>Checklist</th></tr></thead><tbody>
-  ${rows.map(r => `<tr class="click" data-act="ir" data-href="#/obras/${encodeURIComponent(r.q)}"><td class="l"><b>${esc(r.q)}</b></td><td>${r.n}</td><td class="neg">${brl(r.custo)}</td><td class="neg">${brl(r.pagar)}</td><td class="pos">${brl(r.receita)}</td><td class="pos">${brl(r.receber)}</td><td class="${cls(r.proj)}"><b>${brl(r.proj)}</b></td><td>${r.prevCusto ? brl(r.prevRes) : '—'}</td><td>${pctBar(r.prevCusto ? (r.custo + r.pagar) / r.prevCusto : null, true)}</td><td>${pctBar(r.cl)}</td></tr>`).join('') || '<tr><td colspan="10" class="l muted">Nenhuma quadra cadastrada. Vá em Cadastros.</td></tr>'}
-  </tbody></table></div></div>`;
+  const lotesQ = q => lotesDe(q).map(l => infoVendaLote(q, l));
+  const todos = E().quadras.flatMap(lotesQ);
+  const n = { rec: todos.filter(x => x.etapa === 'recebido').length, disp: todos.filter(x => x.etapa === 'disp').length }; n.and = todos.length - n.rec - n.disp;
+  el.innerHTML = `<section class="obras-cab"><div><p class="eh-lab">${esc(E().local)}</p><p class="eh-val fig">${T('n')} lotes em ${E().quadras.length} quadras</p></div>
+    <div class="eh-fatos"><div><span class="k">Resultado projetado</span><span class="v fig ${cls(T('proj'))}">${short(T('proj'))}</span><small>previsto ${short(T('prevRes'))}</small></div><div><span class="k">A receber de vendas</span><span class="v fig pos">${short(T('receber'))}</span><small>${n.and} lotes vendidos a receber</small></div><div><span class="k">A pagar nas obras</span><span class="v fig">${short(T('pagar'))}</span><small>já pago ${short(T('custo'))}</small></div></div></section>
+  <section class="painel mapa"><div class="painel-cab"><h2>Mapa de lotes</h2><p class="legenda"><span><i class="lt rec"></i>Repasse recebido (${n.rec})</span><span><i class="lt and"></i>Vendido, a receber (${n.and})</span><span><i class="lt disp"></i>Disponível (${n.disp})</span></p></div>
+    ${rows.map(r => { const ls = lotesQ(r.q); const ov = r.prevCusto ? (r.custo + r.pagar) / r.prevCusto : null; return `<div class="mq">
+      <a class="mq-nome" href="#/obras/${encodeURIComponent(r.q)}"><b class="fig">${esc(r.q)}</b><small>${r.n} lotes</small></a>
+      <div class="mq-lotes">${ls.map(x => `<a class="lt ${x.etapa === 'recebido' ? 'rec' : x.etapa === 'disp' ? 'disp' : 'and'}" href="#/obras/${encodeURIComponent(r.q)}/${encodeURIComponent(x.l)}" title="Lote ${esc(x.l)}: ${esc(etapaNome(x.etapa))}${x.v && x.v.cliente ? ', ' + esc(x.v.cliente) : ''}" aria-label="Lote ${esc(x.l)}, ${esc(etapaNome(x.etapa))}"></a>`).join('')}</div>
+      <div class="mq-num"><span class="fig ${cls(r.proj)}">${short(r.proj)}</span><small class="${ov > 1 ? 'neg' : ''}">${ov === null ? 'sem orçamento' : 'custo em ' + fPct.format(ov) + ' do orçado'}</small></div></div>`; }).join('') || '<p class="muted">Nenhuma quadra cadastrada. Cadastre em Cadastros.</p>'}
+  </section>
+  <section class="painel"><div class="painel-cab"><h2>Detalhe financeiro por quadra</h2></div><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th>Lotes</th><th>Custo pago</th><th>A pagar</th><th>Receita</th><th>A receber</th><th>Resultado projetado</th><th>Previsto</th><th>Custo vs orçado</th><th>Checklist</th></tr></thead><tbody>
+  ${rows.map(r => `<tr class="click" data-act="ir" data-href="#/obras/${encodeURIComponent(r.q)}"><td class="l"><b>${esc(r.q)}</b></td><td>${r.n}</td><td class="neg">${brl(r.custo)}</td><td>${brl(r.pagar)}</td><td class="pos">${brl(r.receita)}</td><td class="pos">${brl(r.receber)}</td><td class="${cls(r.proj)}"><b>${brl(r.proj)}</b></td><td>${r.prevCusto ? brl(r.prevRes) : '—'}</td><td>${pctBar(r.prevCusto ? (r.custo + r.pagar) / r.prevCusto : null, true)}</td><td>${pctBar(r.cl)}</td></tr>`).join('')}
+  </tbody></table></div></section>`;
 }
 function obraQuadra(el, q) {
   const s = resumoQuadra(q);
@@ -810,7 +848,7 @@ function obraQuadra(el, q) {
   el.innerHTML = `<div class="grid kpis">${kpi('Lotes', s.n, '', '')}${kpi('Custo realizado', brl(s.custo), s.n ? short(s.custo / s.n) + ' por lote' : '', 'neg')}${kpi('A pagar', brl(s.pagar), '', 'neg')}${kpi('Receita realizada', brl(s.receita), '', 'pos')}${kpi('A receber', brl(s.receber), '', 'pos')}${kpi('Resultado projetado', brl(s.proj), 'previsto ' + brl(s.prevRes), cls(s.proj))}${kpi('Checklist', s.cl === null ? '—' : fPct.format(s.cl), 'documentos', '', '#/checklist/' + encodeURIComponent(q))}</div>
   <div class="grid two">
     <div class="card"><h2>Previsto x realizado <span class="hint">quadra inteira</span> <button class="btn sm" id="bOrc">Editar orçamento</button></h2>
-      <div class="legend"><span style="--c:var(--pend)">Previsto</span><span style="--c:var(--out)">Realizado</span><span style="--c:var(--out-soft)">A pagar</span></div><div class="chartbox tall"><canvas id="cQ"></canvas></div></div>
+      <div class="legend"><span style="--c:var(--pend)">Previsto</span><span style="--c:var(--bal)">Realizado</span><span style="--c:var(--steel)">A pagar</span></div><div class="chartbox tall"><canvas id="cQ"></canvas></div></div>
     <div class="card"><h2>Lotes <span class="hint">toque para ver a viabilidade</span></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Lote</th><th>Custo real.</th><th>A pagar</th><th>Venda</th><th class="l">Status</th><th>Checklist</th></tr></thead><tbody>
     ${lotesDe(q).map(l => {
       const ts = S.list.filter(t => t.quadra === q && t.lote === l);
@@ -822,10 +860,10 @@ function obraQuadra(el, q) {
     }).join('') || '<tr><td colspan="6" class="l muted">Sem lotes cadastrados</td></tr>'}</tbody></table></div></div>
   </div>`;
   $('#bOrc', el).onclick = () => formOrcamento(q);
-  const soft = css('--out') + '66';
+  const soft = css('--steel');
   grafico('cQ', { type: 'bar', data: { labels: labs, datasets: [
     { label: 'Previsto', data: labs.map(k => -(p[k] || 0) * s.n), backgroundColor: css('--pend'), borderRadius: 3, stack: 'p' },
-    { label: 'Realizado', data: labs.map(k => -Math.min(0, real[k] || 0)), backgroundColor: css('--out'), borderRadius: 3, stack: 'r' },
+    { label: 'Realizado', data: labs.map(k => -Math.min(0, real[k] || 0)), backgroundColor: css('--bal'), borderRadius: 3, stack: 'r' },
     { label: 'A pagar', data: labs.map(k => -Math.min(0, pag[k] || 0)), backgroundColor: soft, borderRadius: 3, stack: 'r' }
   ] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + brl(c.parsed.x) } } },
     scales: { x: { stacked: true, ticks: { color: css('--muted'), maxTicksLimit: 5, callback: v => short(v) }, grid: { color: css('--line') } }, y: { stacked: true, ticks: { color: css('--ink') }, grid: { display: false } } } } });

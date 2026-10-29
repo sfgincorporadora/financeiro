@@ -1,7 +1,7 @@
 // Service worker: guarda o app no aparelho para abrir sem internet.
 const VERSAO = '__VERSAO__';
 const CACHE = 'sfg-' + VERSAO;
-const ARQUIVOS = ['./', './index.html', './app.js?v=' + VERSAO, './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/logo-branco.svg', './icons/logo-azul.svg', './icons/logo-azul-incorporadora.svg', './icons/logo-branco-incorporadora.svg', './fonts/inter-latin-400-normal.woff2', './fonts/inter-latin-500-normal.woff2', './fonts/inter-latin-600-normal.woff2', './fonts/inter-latin-700-normal.woff2'];
+const ARQUIVOS = ['./', './index.html', './app.js?v=' + VERSAO, './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/logo-branco.svg', './icons/logo-azul.svg', './icons/logo-azul-incorporadora.svg', './icons/logo-branco-incorporadora.svg', './fonts/archivo-var.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
@@ -14,6 +14,7 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return; // Firebase e Google passam direto
+  if (url.pathname.includes('/novo/') && !self.registration.scope.includes('/novo/')) return; // prévia tem o próprio cache
   if (req.mode === 'navigate') {
     // página: tenta a rede (para pegar versão nova), cai no cache se offline
     e.respondWith(fetch(req).then(r => { const c = r.clone(); caches.open(CACHE).then(x => x.put('./index.html', c)); return r; }).catch(() => caches.match('./index.html').then(r => r || caches.match('./'))));

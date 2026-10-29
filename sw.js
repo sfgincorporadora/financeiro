@@ -14,6 +14,7 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return; // Firebase e Google passam direto
+  if (url.pathname.includes('/novo/') && !self.registration.scope.includes('/novo/')) return; // prévia tem o próprio cache
   if (req.mode === 'navigate') {
     // página: tenta a rede (para pegar versão nova), cai no cache se offline
     e.respondWith(fetch(req).then(r => { const c = r.clone(); caches.open(CACHE).then(x => x.put('./index.html', c)); return r; }).catch(() => caches.match('./index.html').then(r => r || caches.match('./'))));
