@@ -38,6 +38,8 @@ const deny = () => { const e = new Error('Missing or insufficient permissions.')
 let prevCols = {};
 function notify() { save(); listeners.forEach(l => l.fire()); }
 export async function setDoc(ref, data, opt) { if (!canWrite(ref.path)) throw deny(); store[ref.path] = opt && opt.merge ? merge(store[ref.path], data) : strip(data); window.__writes = (window.__writes || 0) + 1; notify(); }
+export async function getDocs(ref) { if (!allowed()) throw deny(); const docs = Object.keys(store).filter(p => p.startsWith(ref.path + '/')).map(p => ({ id: p.slice(ref.path.length + 1), data: () => store[p] })); return { docs, forEach: f => docs.forEach(f), size: docs.length }; }
+export async function deleteDoc(ref) { if (!canWrite(ref.path)) throw deny(); delete store[ref.path]; notify(); }
 export async function getDoc(ref) { if (!allowed()) throw deny(); const d = store[ref.path]; return { exists: () => !!d, data: () => d }; }
 export function writeBatch() { const ops = []; return { set: (r, d) => ops.push(() => { store[r.path] = strip(d); }), delete: r => ops.push(() => { delete store[r.path]; }), commit: async () => { if (!isEditor()) throw deny(); ops.forEach(f => f()); notify(); } }; }
 export function onSnapshot(ref, a, b, c) {

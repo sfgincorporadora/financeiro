@@ -1,11 +1,21 @@
 import { initializeApp } from 'firebase/app';
 import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, connectAuthEmulator } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, connectFirestoreEmulator, collection, doc, onSnapshot, setDoc, getDoc, deleteField, writeBatch } from 'firebase/firestore';
-import * as XLSX from 'xlsx';
-import Chart from 'chart.js/auto';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, connectFirestoreEmulator, collection, doc, onSnapshot, setDoc, getDoc, getDocs, deleteField, writeBatch } from 'firebase/firestore';
+/* Bibliotecas pesadas (planilha, gráficos, PDF) carregam só quando usadas: o app abre mais rápido. */
+let XLSX = null, Chart = null, jsPDF = null, autoTable = null;
+const _libs = {};
+function carregarLib(nome) {
+  if (_libs[nome]) return _libs[nome];
+  _libs[nome] = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = `lib-${nome}.js?v=__VERSAO__`;
+    s.onload = () => { if (nome === 'xlsx') XLSX = window.__XLSX; if (nome === 'chart') Chart = window.__Chart; if (nome === 'pdf') { jsPDF = window.__jsPDF; autoTable = window.__autoTable; } res(); };
+    s.onerror = () => { _libs[nome] = null; rej(new Error('Não consegui carregar uma parte do app. Verifique a internet e tente de novo.')); };
+    document.head.appendChild(s);
+  });
+  return _libs[nome];
+}
 import { firebaseConfig } from './config.js';
+import qrcode from 'qrcode-generator';
 
 const VERSAO = '__VERSAO__';
 
@@ -171,17 +181,30 @@ function limpar(t) { const o = { ...t }; delete o.mes; return o; }
 function onErroEscrita(e) { console.error(e); toast(e.code === 'permission-denied' ? 'Sem permissão para salvar. Confira o usuário logado.' : 'Erro ao salvar: ' + (e.message || e), 'err'); }
 
 /* Grava vários títulos agrupando por mês (um documento por mês). Não aguarda o servidor: funciona offline. */
-const CAMPOS_HIST = [['item', 'Descrição'], ['valor', 'Valor'], ['venc', 'Vencimento'], ['status', 'Situação'], ['pag', 'Pago em'], ['conta', 'Conta'], ['juros', 'Juros/multa'], ['destino', 'Destino'], ['local', 'Obra'], ['quadra', 'Quadra'], ['lote', 'Lote'], ['emp', 'CNPJ'], ['forn', 'Fornecedor'], ['nfNum', 'NF'], ['obs', 'Observação']];
+const CAMPOS_HIST = [['item', 'Descrição'], ['valor', 'Valor'], ['venc', 'Vencimento'], ['status', 'Situação'], ['pag', 'Pago em'], ['conta', 'Conta'], ['juros', 'Juros/multa'], ['destino', 'Destino'], ['local', 'Obra'], ['quadra', 'Quadra'], ['lote', 'Lote'], ['emp', 'CNPJ'], ['forn', 'Fornecedor'], ['nfNum', 'NF'], ['obs', 'Observação'], ['etapaObra', 'Etapa da obra'], ['contrato', 'Contrato']];
+const HIST_NO_LANC = 5;
 function registrarHist(t, ant, opt) {
-  const em = Date.now(), por = S.user?.email || '';
-  if (opt.acao) { t.hist = [...(t.hist || []), { em, por, a: opt.acao }].slice(-25); return; }
-  if (!ant) { t.hist = [{ em, por, a: 'criou' }]; t.criadoPor = por; return; }
+  const em = Date.now(), por = S.user?.email || ''; const log = x => { (opt._log = opt._log || []).push({ ...x, t: t.id, item: t.item, valor: t.valor }); return x; };
+  if (opt.acao) { t.hist = [...(t.hist || []), log({ em, por, a: opt.acao })].slice(-HIST_NO_LANC); return; }
+  if (!ant) { t.hist = [log({ em, por, a: 'criou' })]; t.criadoPor = por; return; }
   const m = {};
   for (const [k] of CAMPOS_HIST) { const a = ant[k] ?? '', b = t[k] ?? ''; if (JSON.stringify(a) !== JSON.stringify(b)) m[k] = [a, b]; }
   const na = anexosDe(ant).length, nb = anexosDe(t).length; if (na !== nb) m.anexos = [na, nb];
   if (!Object.keys(m).length) return;
   const a = ant.status !== t.status ? (t.status === 'pago' ? 'baixa' : 'estorno') : 'alterou';
-  t.hist = [...(ant.hist || []), { em, por, a, m }].slice(-25); t.alteradoPor = por;
+  t.hist = [...(ant.hist || []), log({ em, por, a, m })].slice(-HIST_NO_LANC); t.alteradoPor = por;
+}
+function gravarHist(log) {
+  if (!log || !log.length) return; const items = {};
+  for (const x of log) items[x.t + '_' + x.em + '_' + Math.random().toString(36).slice(2, 5)] = JSON.stringify(x);
+  gravar(doc(db, 'hist', hoje().slice(0, 7)), { items }, { merge: true }).catch(onErroEscrita);
+  if (S.histCompleto) for (const k in items) S.histCompleto.push(JSON.parse(items[k]));
+}
+async function carregarHistCompleto() {
+  if (S.histCompleto) return S.histCompleto;
+  const s = await getDocs(collection(db, 'hist')); const out = [];
+  s.forEach(d => { const it = d.data().items || {}; for (const k in it) { try { out.push(JSON.parse(it[k])); } catch (e) { /* ignora */ } } });
+  return (S.histCompleto = out);
 }
 function salvarTitulos(lista, opt = {}) {
   if (somenteLeitura()) { toast('Seu acesso é somente leitura.', 'err'); return; }
@@ -196,15 +219,16 @@ function salvarTitulos(lista, opt = {}) {
   }
   for (const m in apagar) gravar(doc(db, 'titulos', m), { items: apagar[m] }, { merge: true }).catch(onErroEscrita);
   for (const m in porMes) gravar(doc(db, 'titulos', m), { items: porMes[m] }, { merge: true }).catch(onErroEscrita);
+  if (opt._log) { gravarHist(opt._log.length > 400 ? opt._log.filter(x => x.a !== 'criou') : opt._log); delete opt._log; }
 }
 function excluirTitulos(ids, opt = {}) {
   if (somenteLeitura()) { toast('Seu acesso é somente leitura.', 'err'); return; }
   if (!opt.semLixeira) {
     const em = Date.now(), por = S.user?.email || ''; const items = {};
     for (const id of ids) { const t = S.byId.get(id); if (t) items[id] = JSON.stringify({ t: limpar(t), por, em }); }
-    const atuais = Object.entries((S.lixeira && S.lixeira.items) || {}).map(([k, v]) => { try { return [k, JSON.parse(v).em || 0]; } catch (e) { return [k, 0]; } }).sort((a, b) => b[1] - a[1]);
-    const limite = em - 90 * 864e5; atuais.forEach(([k, e], i) => { if (e < limite || i + Object.keys(items).length >= 1500) items[k] = deleteField(); });
-    if (Object.keys(items).length) gravar(doc(db, 'config', 'lixeira'), { items }, { merge: true }).catch(onErroEscrita);
+    if (Object.keys(items).length) gravar(doc(db, 'lixeira', isoLocal(new Date(em)).slice(0, 7)), { items }, { merge: true }).catch(onErroEscrita);
+    const velho = isoLocal(new Date(em - 92 * 864e5)).slice(0, 7);
+    for (const b of new Set(Object.values(S.lixeiraOnde || {}))) if (b < velho) gravar(doc(db, 'lixeira', b), { items: {} }).catch(onErroEscrita);
   }
   const porMes = {};
   for (const id of ids) { const t = S.byId.get(id); if (!t) continue; (porMes[t.mes] = porMes[t.mes] || {})[id] = deleteField(); }
@@ -257,7 +281,7 @@ const normTxt = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g
 const docsCk = () => (S.checklist && S.checklist.docs) || DOCS_PADRAO;
 /* Arquivo mais recente de um documento para o lote: no próprio lote, na quadra ou na obra. */
 function arquivoDoc(q, l, doc) {
-  const A = (S.docsdrive && S.docsdrive.arq) || {};
+  const A = (S.docsArq && S.docsArq.arq) || (S.docsdrive && S.docsdrive.arq) || {};
   const c = [(A['L|' + q + '|' + l] || {})[doc], (A['Q|' + q] || {})[doc], (A['O|' + obraDe(q)] || {})[doc]].filter(Boolean);
   return c.sort((a, b) => (b.d || '').localeCompare(a.d || ''))[0] || null;
 }
@@ -301,11 +325,17 @@ function iniciarDados() {
     if (e.code === 'permission-denied') { atual.view = null; const v = $('#view'); if (v) v.innerHTML = `<div class="empty card"><h2>Sem acesso</h2><p>O usuário <b>${esc(S.user?.email)}</b> não tem permissão para ver os dados da SFG.</p><button class="btn primary" id="bSairX">Sair e entrar com outro usuário</button></div>`; const b = $('#bSairX'); if (b) b.onclick = () => signOut(auth); }
     else toast('Erro de acesso aos dados: ' + (e.code || e.message), 'err');
   }));
+  /* Coleções em blocos (um documento por mês ou por quadra): sem o limite de 1 MB de um documento só. */
+  const blocos = (col, aoMudar) => S.unsubs.push(onSnapshot(collection(db, col), s => { const o = {}; s.forEach(d => { o[d.id] = d.data(); }); S['raw_' + col] = o; aoMudar(o); agendarRefresh(); }, e => console.warn(e)));
+  for (const [col, fn] of BLOCOS_EXTRA) blocos(col, fn);
+  blocos('lixeira', o => { const items = {}, onde = {}; for (const b in o) for (const k in (o[b].items || {})) { items[k] = o[b].items[k]; onde[k] = b; } S.lixeira = { items }; S.lixeiraOnde = onde; S.loaded.lixeira = true; });
+  blocos('fluxoLotes', o => { const m = {}; for (const b in o) { const q = o[b].q; for (const l in (o[b].lotes || {})) m[q + '|' + l] = o[b].lotes[l]; } S.fluxoLotes = m; S.loaded.fluxoLotes = true; });
+  blocos('docsArq', o => { const arq = {}, outros = {}; for (const b in o) { Object.assign(arq, o[b].arq || {}); Object.assign(outros, o[b].outros || {}); } S.docsArq = { arq, outros, blocos: Object.keys(o) }; S.loaded.docsArq = true; });
   const cfg = (id, key) => S.unsubs.push(onSnapshot(doc(db, 'config', id), snap => {
     S[key] = snap.exists() ? snap.data() : null; if (key === 'estrutura') S.loaded.estrutura = true; agendarRefresh();
   }, e => console.error(e)));
   cfg('estrutura', 'estrutura'); cfg('orcamento', 'orcamento'); cfg('checklist', 'checklist');
-  cfg('drive', 'drive'); cfg('fluxo', 'fluxo'); cfg('docsdrive', 'docsdrive'); cfg('agenda', 'agenda'); cfg('lixeira', 'lixeira'); cfg('recorrencias', 'recorrencias'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
+  cfg('drive', 'drive'); for (const k of CONFIG_EXTRA) cfg(k, k); cfg('fluxo', 'fluxo'); cfg('docsdrive', 'docsdrive'); cfg('agenda', 'agenda'); cfg('lixeira', 'lixeiraAntiga'); cfg('recorrencias', 'recorrencias'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
   S.unsubs.push(onSnapshot(doc(db, 'config', 'acesso'), s => { S.acesso = s.exists() ? s.data() : null; document.body.classList.toggle('ro', somenteLeitura()); agendarRefresh(); }, e => console.warn(e)));
   S.unsubs.push(onSnapshot(collection(db, 'extratos'), s => { S.extratos = {}; s.forEach(d => S.extratos[d.id] = d.data()); agendarRefresh(); }, e => console.warn(e)));
 }
@@ -321,8 +351,19 @@ function atualizarSync() {
 }
 addEventListener('online', atualizarSync); addEventListener('offline', atualizarSync);
 let _raf = 0;
+let _migrou = false;
+function migrarBlocos() {
+  if (_migrou || somenteLeitura() || !S.user || !S.loaded.lixeira || !S.loaded.fluxoLotes || !S.loaded.docsArq || S.lixeiraAntiga === undefined || S.fluxo === undefined || S.docsdrive === undefined) return;
+  _migrou = true;
+  const lx = S.lixeiraAntiga && S.lixeiraAntiga.items;
+  if (lx && Object.keys(lx).length) { const por = {}; for (const k in lx) { let em = Date.now(); try { em = JSON.parse(lx[k]).em || em; } catch (e) { /* ok */ } (por[isoLocal(new Date(em)).slice(0, 7)] = por[isoLocal(new Date(em)).slice(0, 7)] || {})[k] = lx[k]; } for (const b in por) gravar(doc(db, 'lixeira', b), { items: por[b] }, { merge: true }).catch(onErroEscrita); gravar(doc(db, 'config', 'lixeira'), { items: {} }).catch(onErroEscrita); }
+  const fl = S.fluxo && S.fluxo.lotes;
+  if (fl && Object.keys(fl).length) { const por = {}; for (const k in fl) { const [q, l] = k.split('|'); (por[q] = por[q] || {})[l] = fl[k]; } for (const q in por) gravar(doc(db, 'fluxoLotes', 'Q_' + idBloco(q)), { q, lotes: por[q] }, { merge: true }).catch(onErroEscrita); gravar(doc(db, 'config', 'fluxo'), { lotes: deleteField() }, { merge: true }).catch(onErroEscrita); }
+  const dd = S.docsdrive;
+  if (dd && (dd.arq || dd.outros)) { salvarArqDocs(dd.arq || {}, dd.outros || {}, true); salvarDocsDrive(dd); }
+}
 let _recT = 0;
-function agendarRefresh() { agendarAgenda(); clearTimeout(_recT); _recT = setTimeout(() => gerarRecorrencias(), 1200); if (_raf) return; _raf = requestAnimationFrame(() => { _raf = 0; refreshView(); }); }
+function agendarRefresh() { agendarAgenda(); migrarBlocos(); if (typeof agendarPortais === 'function') agendarPortais(); clearTimeout(_recT); _recT = setTimeout(() => gerarRecorrencias(), 1200); if (_raf) return; _raf = requestAnimationFrame(() => { _raf = 0; refreshView(); }); }
 
 /* =========================================================
    Ícones
@@ -360,15 +401,31 @@ const IC = {
   scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16 8v8"/>',
   movimento: '<path d="M3 3v18h18M7 15l3-3 3 3 5-6"/><path d="M7 19v-2M11 19v-4M15 19v-3M19 19v-6"/>',
   etapas: '<rect x="3" y="4" width="6" height="5" rx="1"/><rect x="15" y="4" width="6" height="5" rx="1"/><rect x="9" y="15" width="6" height="5" rx="1"/><path d="M9 6.5h6M18 9v3H12v3"/>',
+  busca: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  area_relatorios: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 17v-3M12 17v-6M16 17v-4"/>',
+  area_suprimentos: '<path d="M4 7h16l-1.5 11a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2zM9 7V5a3 3 0 0 1 6 0v2"/>',
+  area_planejamento: '<path d="M3 4h18v16H3zM3 9h18M8 4v16M12 13h6M12 16h4"/>',
+  area_documentos: '<path d="M9 11l2 2 4-4M5 4h14v16H5z"/>',
+  area_sistema: '<circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M17 8h4M17 12h4M18 16h3"/>',
+  arrumar: '<path d="M3 6h13M3 12h9M3 18h6M17 14l2 2 4-4"/>',
   clip: '<path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>'
 };
 const ic = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 
+/* Menu: telas parecidas ficam juntas numa área com abas. */
+const AREAS = {
+  relatorios: ['Relatórios', [['demonstrativos', 'DRE, DFC e BP'], ['relatorios', 'Relatório mensal'], ['movimento', 'Histórico financeiro'], ['ret', 'Impostos (RET)']]],
+  suprimentos: ['Contratos e compras', [['contratos', 'Contratos'], ['compras', 'Compras e cotações']]],
+  planejamento: ['Planejamento', [['orcamento', 'Orçamento por etapa'], ['cronograma', 'Cronograma'], ['simulador', 'Simulador']]],
+  documentos: ['Documentos e etapas', [['checklist', 'Checklist'], ['etapas', 'Fluxo do lote'], ['diario', 'Diário de obra']]],
+  sistema: ['Usuários e dados', [['usuarios', 'Usuários'], ['historico', 'Histórico e lixeira'], ['dados', 'Dados e backup']]]
+};
+const areaDe = nome => Object.keys(AREAS).find(a => AREAS[a][1].some(x => x[0] === nome));
 const NAV = [
-  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['movimento', 'Histórico financeiro'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['demonstrativos', 'DRE, DFC e BP'], ['relatorios', 'Relatório mensal'],
-  ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['cronograma', 'Cronograma'], ['vendas', 'Vendas e repasses'], ['checklist', 'Checklist'], ['etapas', 'Fluxo do lote'], ['simulador', 'Simulador'],
-  ['#', 'Gestão'], ['empresas', 'Empresas (CNPJ)'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['historico', 'Histórico e lixeira'], ['dados', 'Dados e backup']
-];
+  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['@relatorios'],
+  ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['vendas', 'Vendas e repasses'], ['@suprimentos'], ['@planejamento'], ['@documentos'],
+  ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['empresas', 'Empresas (CNPJ)'], ['arrumar', 'Arrumar lançamentos'], ['cadastros', 'Cadastros'], ['@sistema']
+].map(([k, n]) => k[0] === '@' ? [AREAS[k.slice(1)][1][0][0], AREAS[k.slice(1)][0], k.slice(1)] : [k, n]);
 const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg', LOGO_COMPLETO = 'icons/logo-azul-incorporadora.svg';
 const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Receber'], ['obras', 'Obras'], ['mais', 'Mais']];
 
@@ -407,10 +464,11 @@ function telaLogin(msg) {
 function montarShell() {
   document.body.innerHTML = `<div class="app">
     <aside class="side"><div class="brand"><img class="logo-img" src="${LOGO_BRANCO}" alt=""><div><b>SFG</b><small>INCORPORADORA</small></div></div>
-      <nav>${NAV.map(([k, n]) => k === '#' ? `<div class="sec">${n}</div>` : `<a href="#/${k}" data-nav="${k}">${ic(k, 18)}<span>${n}</span></a>`).join('')}</nav>
+      <nav>${NAV.map(([k, n, ar]) => k === '#' ? `<div class="sec">${n}</div>` : `<a href="#/${k}" data-nav="${k}" ${ar ? `data-area="${ar}"` : ''}>${ic(ar ? 'area_' + ar : k, 18)}<span>${n}</span></a>`).join('')}</nav>
       <div class="side-foot"><span id="sideUser" class="muted"></span></div></aside>
     <div class="main">
-      <header class="top"><button class="icon-btn back hidden" id="btnBack" aria-label="Voltar">${ic('voltar')}</button><img class="tlogo" src="${LOGO_BRANCO}" alt="SFG"><h1 id="title"></h1><span id="sync" class="sync"></span><button class="icon-btn tema-btn" id="btnTema" data-act="temaCiclo" aria-label="Tema">${ic(temaPref() === 'claro' ? 'sol' : temaPref() === 'escuro' ? 'lua' : 'auto')}</button><button class="btn primary desk rw" data-act="novo">${ic('plus', 18)} Novo lançamento</button></header>
+      <header class="top"><button class="icon-btn back hidden" id="btnBack" aria-label="Voltar">${ic('voltar')}</button><img class="tlogo" src="${LOGO_BRANCO}" alt="SFG"><h1 id="title"></h1><span id="sync" class="sync"></span><button class="icon-btn busca-btn" data-act="busca" aria-label="Buscar ou perguntar" title="Buscar ou perguntar (tecla /)">${ic('busca')}</button><button class="icon-btn tema-btn" id="btnTema" data-act="temaCiclo" aria-label="Tema">${ic(temaPref() === 'claro' ? 'sol' : temaPref() === 'escuro' ? 'lua' : 'auto')}</button><button class="btn primary desk rw" data-act="novo">${ic('plus', 18)} Novo lançamento</button></header>
+      <nav id="areaTabs" class="area-tabs hidden" aria-label="Seções"></nav>
       <div id="view" class="view"></div>
     </div>
     <nav class="bottom">${NAV_MOBILE.map(([k, n]) => `<a href="#/${k}" data-nav="${k}">${ic(k, 22)}<span>${n}</span></a>`).join('')}</nav>
@@ -429,11 +487,14 @@ function roteador() {
   const parts = (location.hash.replace(/^#\/?/, '') || 'inicio').split('/').map(decodeURIComponent);
   const nome = VIEWS[parts[0]] ? parts[0] : 'inicio';
   const args = parts.slice(1);
+  const area = areaDe(nome);
   $$('[data-nav]').forEach(a => {
     const k = a.dataset.nav;
-    const on = k === nome || (k === 'mais' && !['inicio', 'pagar', 'receber', 'obras'].includes(nome));
+    const on = (a.dataset.area ? a.dataset.area === area : k === nome) || (k === 'mais' && !['inicio', 'pagar', 'receber', 'obras'].includes(nome));
     a.classList.toggle('on', on);
   });
+  const at = $('#areaTabs'); at.classList.toggle('hidden', !area);
+  at.innerHTML = area ? AREAS[area][1].map(([k, n]) => `<a href="#/${k}" class="${k === nome ? 'on' : ''}">${n}</a>`).join('') : '';
   const v = VIEWS[nome];
   $('#title').textContent = typeof v.titulo === 'function' ? v.titulo(args) : v.titulo;
   $('#btnBack').classList.toggle('hidden', !args.length);
@@ -619,6 +680,7 @@ function formNovo(def = {}) {
     <label>Descrição<input name="item" required placeholder="Ex.: Mendonça NF, Parcela terreno, Venda" list="dlItens" value="${esc(def.item || '')}"></label>
     <div class="g2"><label>Fornecedor / cliente<input name="forn" list="dlForn" value="${esc(def.forn || '')}"></label>
       <label>Destino<select name="destino" required>${optsDestino(def.destino || (def.tipo === 'entrada' ? 'Venda' : 'Material'))}</select></label></div>
+    <label id="rowEtapa" class="${def.tipo === 'entrada' ? 'hidden' : ''}">Etapa da obra <span class="muted">(opcional, para o orçamento por etapa)</span><select name="etapaObra">${opts(etapasOrc(), def.etapaObra || '', 'Sem etapa')}</select></label>
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required placeholder="0,00" value="${def.valor ? fNum2.format(Math.abs(def.valor)) : ''}"></label>
       <label>O valor informado é<select name="modo"><option value="total">Total (dividir entre lotes e parcelas)</option><option value="cada">De cada lançamento</option></select></label></div>
     ${campoObra(def.quadra && def.quadra !== '-' ? obraDe(def.quadra) : '', def.emp)}
@@ -643,7 +705,7 @@ function formNovo(def = {}) {
   </form>`);
   const F = f.el.querySelector('#fNovo');
   let tipo = def.tipo === 'entrada' ? 'entrada' : 'saida';
-  $$('#segTipo button', F).forEach(b => b.onclick = () => { tipo = b.dataset.v; $$('#segTipo button', F).forEach(x => x.classList.toggle('on', x === b)); F.destino.value = tipo === 'entrada' ? 'Venda' : 'Material'; prev(); });
+  $$('#segTipo button', F).forEach(b => b.onclick = () => { tipo = b.dataset.v; $$('#segTipo button', F).forEach(x => x.classList.toggle('on', x === b)); F.destino.value = tipo === 'entrada' ? 'Venda' : 'Material'; $('#rowEtapa', F).classList.toggle('hidden', tipo === 'entrada'); prev(); });
   const lotesBox = () => {
     const q = F.quadra.value, ls = q === '-' ? [] : lotesDe(q);
     $('#boxLotes', F).innerHTML = ls.length ? `<div class="lbl">Lotes <span class="muted">(nenhum marcado = custo geral da quadra)</span> <button type="button" class="btn link sm" data-lt="all">Todos</button><button type="button" class="btn link sm" data-lt="none">Limpar</button></div>
@@ -695,6 +757,7 @@ function formNovo(def = {}) {
         const t = { id: uid(), item, valor, juros: 0, ...(F.fornCnpj.value ? { fornCnpj: F.fornCnpj.value } : {}), nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
         if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
         if (venc !== parc[i].d) t.vencOrig = parc[i].d;
+        if (F.etapaObra.value && tipo === 'saida') t.etapaObra = F.etapaObra.value;
         empDoForm(F, t);
         const qt = parseBR(F.qtd.value); if (qt > 0) { t.qtd = Math.round((F.modo.value === 'cada' ? qt : qt / total) * 1000) / 1000; t.unid = F.unid.value.trim(); }
         if (def.conc && total === 1) t.conc = def.conc;
@@ -793,6 +856,7 @@ function formEditar(t) {
     <div class="seg full" id="segTipo"><button type="button" data-v="saida" class="${t.valor < 0 ? 'on' : ''}">Saída</button><button type="button" data-v="entrada" class="${t.valor >= 0 ? 'on' : ''}">Entrada</button></div>
     <label>Descrição<input name="item" required value="${esc(t.item)}"></label>
     <div class="g2"><label>Fornecedor / cliente<input name="forn" value="${esc(t.forn || '')}"></label><label>Destino<select name="destino">${optsDestino(t.destino)}${todosDestinos().includes(t.destino) ? '' : `<option selected>${esc(t.destino)}</option>`}</select></label></div>
+    ${t.valor < 0 ? `<label>Etapa da obra<select name="etapaObra">${opts(etapasOrc().concat(t.etapaObra && !etapasOrc().includes(t.etapaObra) ? [t.etapaObra] : []), t.etapaObra || '', 'Sem etapa')}</select></label>` : ''}
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required value="${fNum2.format(Math.abs(t.valor))}"></label><label>Vencimento<input type="date" name="venc" required value="${esc(t.venc)}"></label></div>
     <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Se cair em fim de semana ou feriado, passar para o próximo dia útil</label><p class="hint-data" id="edHint"></p>
     ${campoObra(obraT(t), empDef(t) ? t.emp : '')}
@@ -815,6 +879,7 @@ function formEditar(t) {
     const sg = tipo === 'saida' ? -1 : 1;
     const n = { ...t, item: F.item.value.trim(), forn: F.forn.value.trim(), destino: F.destino.value, valor: sg * v, venc: F.util.checked ? proximoDiaUtil(F.venc.value) : F.venc.value, quadra: F.quadra.value, local: F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : (t.local || E().obras[0])), lote: F.lote.value, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), obs: F.obs.value.trim() };
     empDoForm(F, n);
+    if (F.etapaObra) { if (F.etapaObra.value) n.etapaObra = F.etapaObra.value; else delete n.etapaObra; }
     { const qt = parseBR(F.qtd.value); if (qt > 0) { n.qtd = qt; n.unid = F.unid.value.trim(); } else { delete n.qtd; delete n.unid; } }
     if (pago(t)) { n.pag = F.pag.value; n.conta = F.conta.value; const j = parseBR(F.juros.value); n.juros = j > 0 ? sg * j : 0; }
     salvarTitulos([n]); f.fechar(); toast('Alteração salva');
@@ -846,6 +911,7 @@ function formBaixa(ids) {
   };
 }
 
+ACOES.histT = async d => { try { const hs = (await carregarHistCompleto()).filter(x => x.t === d.id).sort((a, b) => b.em - a.em); folha('Histórico completo', hs.length ? `<ol class="hist-ol">${hs.map(h => `<li>${histTxt(h)}</li>`).join('')}</ol>` : '<p class="muted">As mudanças anteriores a esta versão do app ficam só no resumo do lançamento.</p>'); } catch (e) { toast('Não consegui carregar o histórico: ' + e.message, 'err'); } };
 /* ---------- Detalhe ---------- */
 function detalhe(t) {
   const venc = !pago(t) && t.venc < hoje();
@@ -862,10 +928,10 @@ function detalhe(t) {
     <div id="anexoBox" class="anx"><div class="lbl">Anexos</div>
       <div class="anx-lista">${anexosDe(t).map((a, i) => `<div class="anx-row"><button type="button" class="btn sm" data-vax="${i}">${ic('clip', 14)} ${esc(tipoAnexoNome(a.tipo))}</button><span class="muted small">${a.link ? 'no Google Drive' : 'aguardando envio ao Drive'}</span><button type="button" class="x rw" data-rax="${i}" aria-label="Remover anexo">×</button></div>`).join('') || '<p class="muted small">Nenhum anexo.</p>'}</div>
       <div class="anx-add rw"><select id="tipoAx" aria-label="Tipo do anexo">${opts(TIPOS_ANEXO, pago(t) ? 'comprovante' : 'nota')}</select><label class="btn sm file">${ic('clip', 14)} Adicionar foto ou PDF<input type="file" id="addAnexo" accept="image/*,application/pdf" hidden></label></div></div>
-    ${(t.hist || []).length ? `<details class="hist"><summary>Histórico de alterações (${t.hist.length})</summary><ol>${t.hist.slice().reverse().map(h => `<li>${histTxt(h)}</li>`).join('')}</ol></details>` : ''}
+    ${(t.hist || []).length ? `<details class="hist"><summary>Histórico de alterações</summary><ol>${t.hist.slice().reverse().map(h => `<li>${histTxt(h)}</li>`).join('')}</ol><button class="btn link sm" data-act="histT" data-id="${esc(t.id)}">Ver histórico completo</button></details>` : ''}
     <div class="acts wrap">
       ${pago(t) ? `<button class="btn" id="dEst">Estornar baixa</button>` : `<button class="btn primary" id="dBx">${t.valor < 0 ? 'Registrar pagamento' : 'Registrar recebimento'}</button>`}
-      <button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
+      ${!pago(t) && t.valor > 0 ? `<button class="btn" data-act="pix" data-id="${esc(t.id)}">Cobrar por PIX</button>` : ''}<button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
       ${grupo.filter(x => !pago(x)).length > 1 ? `<button class="btn danger ghost" id="dDelG">Excluir ${grupo.filter(x => !pago(x)).length} em aberto do grupo</button>` : ''}
     </div>`);
   const on = (id, fn) => { const b = f.el.querySelector('#' + id); if (b) b.onclick = fn; };
@@ -998,10 +1064,12 @@ function nomeAnexo(ts, mime, tipo) {
   const base = `${t.venc || hoje()} ${ts.length > 1 ? baseItem(t) : t.item.replace(/\s*-\s*\S+\s+\S+$/, '')}${t.nfNum ? ' NF ' + t.nfNum : ''}${onde}`;
   return (base + (tipo ? ' (' + tipoAnexoNome(tipo).toLowerCase() + ')' : '')).replace(/[\/\\:*?"<>|#%]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 150) + (mime === 'application/pdf' ? '.pdf' : '.jpg');
 }
+/* Outros módulos com arquivos a enviar ao Drive (ex.: fotos do diário de obra). */
+const DRIVE_EXTRA = [];
 const anexosPendentes = () => { const m = new Map(); for (const t of S.list) for (const a of anexosDe(t)) if (a.id && !a.link) { const e = m.get(a.id) || m.set(a.id, { ids: [], tipo: a.tipo }).get(a.id); e.ids.push(t.id); } return m; };
 async function sincronizarDrive(interativo) {
   if (!driveConfigurado() || DRV.enviando || somenteLeitura() || !navigator.onLine) return;
-  const pend = anexosPendentes(); if (!pend.size) return;
+  const pend = anexosPendentes(); const extras = sum(DRIVE_EXTRA, x => x.pendentes()); if (!pend.size && !extras) return;
   let tk; try { tk = await driveToken(interativo); } catch (e) { if (interativo) toast(e.message, 'err'); return; }
   if (!tk) return;
   DRV.enviando = true; DRV.erro = ''; let ok = 0;
@@ -1021,6 +1089,7 @@ async function sincronizarDrive(interativo) {
       gravar(doc(db, 'anexos', aid), { drive: r.id, link: r.webViewLink, mime: a.mime, nome: a.nome || '', enviado: Date.now() }).catch(onErroEscrita);
       ok++; refreshView();
     }
+    for (const x of DRIVE_EXTRA) ok += await x.enviar();
     if (ok) toast(`${ok} anexo(s) enviados ao Google Drive`);
   } catch (e) { DRV.erro = e.message === 'drive-desconectado' ? 'A autorização do Drive expirou. Toque em Conectar.' : e.message; if (interativo) toast(DRV.erro, 'err'); }
   finally { DRV.enviando = false; refreshView(); }
@@ -1189,7 +1258,7 @@ function kpi(lab, val, sub, c, act) { return `<div class="card kpi ${act ? 'clic
    Gráficos
    ========================================================= */
 const charts = {};
-function grafico(id, cfg) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } const c = document.getElementById(id); if (c) charts[id] = new Chart(c, cfg); }
+function grafico(id, cfg) { if (!Chart) { carregarLib('chart').then(() => grafico(id, cfg)).catch(e => toast(e.message, 'err')); return; } if (charts[id]) { charts[id].destroy(); delete charts[id]; } const c = document.getElementById(id); if (c) charts[id] = new Chart(c, cfg); }
 function graficoSaldo(id, dias, limite) {
   let ds = dias;
   if (limite) { const lim = addDays(hoje(), limite); ds = dias.filter(x => x.d <= lim); ds = ds.concat([{ d: lim, v: ds[ds.length - 1].v }]); }
@@ -1254,7 +1323,7 @@ VIEWS.inicio = {
       return `<div class="ag-dia"><h3 class="${g.k === 'vencidas' ? 'neg' : ''}"><span>${nomeDia(g.k)}</span><span class="fig ${cls(tot)}">${brl(tot)}</span></h3>${es.map(e => linhaEntrada(e, { baixa: true, semData: true })).join('')}</div>`; }).join('');
     const qs = E().quadras.map(resumoQuadra).sort((a, b) => b.proj - a.proj); const qmax = Math.max(1, ...qs.map(q => Math.abs(q.proj)));
     const agVelha = agendaAtiva() && !somenteLeitura() && (!S.agenda.ultima || Date.now() - S.agenda.ultima > 864e5);
-    el.innerHTML = `${agVelha ? `<div class="alerta-caixa"><span>Os avisos da Google Agenda não são atualizados desde ${S.agenda.ultima ? quando(S.agenda.ultima) : 'a ativação'}.</span><button class="btn sm" data-act="agSync">Atualizar agenda</button></div>` : ''}<section class="extrato-hero">
+    el.innerHTML = `${painelAlertas()}<section class="extrato-hero">
       <div class="eh-topo">
         <div class="eh-saldo"><p class="eh-lab">Saldo em caixa, ${esc(dataLonga)}</p><p class="eh-val fig ${sd.total < 0 ? 'neg' : ''}">${brl(sd.total)}</p>
           <p class="eh-contas">${sd.contas.map(c => `<span>${esc(c.nome)} <b class="fig">${brl(c.saldo)}</b></span>`).join('')}</p></div>
@@ -1541,7 +1610,18 @@ async function raizSFG() {
   cfg.raiz = { sfg: sfg.id, anexos: an.id, link: sfg.webViewLink }; cfg.anos = {}; cfg.meses = {}; S.drive = cfg; gravar(doc(db, 'config', 'drive'), cfg).catch(onErroEscrita);
   return sfg.id;
 }
-function salvarDocsDrive(cfg) { S.docsdrive = cfg; gravar(doc(db, 'config', 'docsdrive'), cfg).catch(onErroEscrita); }
+function salvarDocsDrive(cfg) { const c = { ...cfg }; delete c.arq; delete c.outros; S.docsdrive = c; gravar(doc(db, 'config', 'docsdrive'), c).catch(onErroEscrita); }
+const blocoDoc = chave => { const [n, a] = chave.split('|'); return n === 'O' ? 'O_' + idBloco(a) : 'Q_' + idBloco(a); };
+/* Grava os arquivos encontrados agrupados por quadra (e por obra). */
+function salvarArqDocs(arq, outros, parcial) {
+  const por = {};
+  for (const k in arq) { const b = blocoDoc(k); (por[b] = por[b] || { arq: {}, outros: {} }).arq[k] = arq[k]; }
+  for (const k in (outros || {})) { const b = blocoDoc(k); (por[b] = por[b] || { arq: {}, outros: {} }).outros[k] = outros[k]; }
+  if (!parcial) for (const b of ((S.docsArq && S.docsArq.blocos) || [])) if (!por[b]) por[b] = { arq: {}, outros: {} };
+  for (const b in por) gravar(doc(db, 'docsArq', b), por[b], parcial ? { merge: true } : undefined).catch(onErroEscrita);
+  const atual = parcial ? { arq: { ...((S.docsArq || {}).arq || {}), ...arq }, outros: { ...((S.docsArq || {}).outros || {}), ...(outros || {}) } } : { arq, outros: outros || {} };
+  S.docsArq = { ...atual, blocos: [...new Set([...(((S.docsArq || {}).blocos) || []), ...Object.keys(por)])] };
+}
 /* Garante a pasta Documentos / Obra / Quadra / Lote e devolve o id. */
 async function pastaDocs(q, l) {
   const cfg = clone(S.docsdrive || {}); cfg.p = cfg.p || {}; let mudou = false;
@@ -1594,7 +1674,7 @@ async function lerDocsDrive(interativo) {
         }
       }
     }
-    cfg.arq = arq; cfg.outros = outros; cfg.ultima = Date.now(); cfg.n = nArq; salvarDocsDrive(cfg);
+    cfg.ultima = Date.now(); cfg.n = nArq; salvarDocsDrive(cfg); salvarArqDocs(arq, outros);
     if (interativo) toast(`${nArq} arquivo(s) encontrados no Drive`);
   } catch (e) { DD.erro = e.message === 'drive-desconectado' ? 'A autorização do Google expirou. Toque em Atualizar do Drive.' : e.message; if (interativo) toast(DD.erro, 'err'); }
   finally { DD.lendo = false; DD.prog = ''; refreshView(); }
@@ -1621,7 +1701,7 @@ ACOES.docVal = d => {
 /* Documentos de um lote: situação de cada um, abrir, enviar arquivo, marcar à mão. */
 ACOES.ckLote = d => {
   const [q, l] = d.k.split('|'); const docs = docsCk(); const dd = S.docsdrive || {};
-  const pl = dd.p && dd.p['L|' + q + '|' + l]; const outros = ((dd.outros || {})['L|' + q + '|' + l] || []);
+  const pl = dd.p && dd.p['L|' + q + '|' + l]; const outros = ((((S.docsArq || {}).outros) || dd.outros || {})['L|' + q + '|' + l] || []);
   const linha = (doc, i) => { const e = estadoDoc(q, l, i); return `<div class="ckdoc ${e.feito ? 'ok' : ''} ${e.venc ? 'venc' : ''}"><span class="dot ${e.feito ? 'y' : ''} ${e.arq ? 'arq' : ''} ${e.venc ? 'venc' : ''}"></span><div class="ckdoc-txt"><b>${esc(doc)}</b><small>${e.arq ? `${esc(e.arq.n)} · ${dBR(e.arq.d)}${e.dias ? (e.venc ? ` · <span class="neg">vencido em ${dBR(e.vale)}</span>` : ` · vale até ${dBR(e.vale)}`) : ''}${e.arq.c > 1 ? ` · ${e.arq.c} versões` : ''}` : e.manual ? 'marcado à mão, sem arquivo' : 'pendente'}</small></div>
     <span class="ckdoc-acts">${e.arq ? `<a class="btn sm" href="https://drive.google.com/file/d/${esc(e.arq.i)}/view" target="_blank" rel="noopener">Abrir</a>` : ''}<label class="btn sm file rw">Enviar<input type="file" data-up="${i}" accept="image/*,application/pdf" hidden></label><button type="button" class="btn sm ghost rw" data-man="${i}">${e.manual ? 'Desmarcar' : 'Marcar'}</button></span></div>`; };
   const f = folha(`Documentos · Quadra ${q}, lote ${l}`, `<div class="ckdocs">${docs.map(linha).join('')}</div>
@@ -1636,8 +1716,9 @@ ACOES.ckLote = d => {
       const pasta = await pastaDocs(q, l); const ext = (file.name.match(/\.[a-z0-9]{2,4}$/i) || [file.type === 'application/pdf' ? '.pdf' : '.jpg'])[0];
       const nome = `${doc} - Quadra ${q} lote ${l} - ${hoje()}${ext}`.replace(/[\/\\:*?"<>|#%]+/g, '-');
       const r = await enviarArquivoDrive(file, nome, pasta);
-      const cfg = clone(S.docsdrive || {}); cfg.arq = cfg.arq || {}; const k = 'L|' + q + '|' + l; cfg.arq[k] = cfg.arq[k] || {}; const at = cfg.arq[k][doc];
-      cfg.arq[k][doc] = { i: r.id, n: nome, d: hoje(), c: (at ? at.c || 1 : 0) + 1 }; cfg.n = (cfg.n || 0) + 1; salvarDocsDrive(cfg);
+      const k = 'L|' + q + '|' + l; const daLote = { ...((((S.docsArq || {}).arq) || {})[k] || {}) }; const at = daLote[doc];
+      daLote[doc] = { i: r.id, n: nome, d: hoje(), c: (at ? at.c || 1 : 0) + 1 }; salvarArqDocs({ [k]: daLote }, null, true);
+      const cfg = clone(S.docsdrive || {}); cfg.n = (cfg.n || 0) + 1; salvarDocsDrive(cfg);
       toast(doc + ' enviado'); f.fechar(); ACOES.ckLote(d);
     } catch (e) { toast(e.message === 'drive-desconectado' ? 'A autorização do Google expirou. Tente de novo.' : e.message, 'err'); }
   });
@@ -1694,6 +1775,8 @@ ACOES.cadEmp = d => {
     <div class="g2"><label>CNPJ<input name="cnpj" inputmode="numeric" value="${esc(fCnpj(x?.cnpj || ''))}" placeholder="00.000.000/0000-00"></label>
     <label>Tipo<select name="tipo">${opts([['filial', 'Filial'], ['matriz', 'Matriz']], x?.tipo || 'filial')}</select></label></div>
     <label class="chk"><input type="checkbox" name="ret" ${x ? (x.ret ? 'checked' : '') : 'checked'}> Optante pelo RET (patrimônio de afetação)</label>
+    <div class="g2"><label>Alíquota do RET<select name="retAliq">${opts([['4', '4% (regra geral)'], ['1', '1% (MCMV Faixa 1)']], String(x?.retAliq || 4))}</select></label><label>Chave PIX para cobranças<input name="pix" value="${esc(x?.pix || '')}" placeholder="CNPJ, e-mail, telefone ou chave aleatória"></label></div>
+    <div class="g2"><label>Nome no PIX<input name="pixNome" value="${esc(x?.pixNome || x?.nome || '')}" maxlength="25"></label><label>Cidade no PIX<input name="pixCidade" value="${esc(x?.pixCidade || 'Juazeiro')}" maxlength="15"></label></div>
     <label>Obras desta empresa<div class="chips">${e.obras.map(o => `<label class="chip"><input type="checkbox" name="obras" value="${esc(o)}" ${x && empDaObra(o) === x.id ? 'checked' : ''}> ${esc(o)}</label>`).join('')}</div></label>
     <p class="muted small" id="cnpjAviso"></p>
     ${x && nT ? `<p class="muted small">${nT} lançamento(s) nesta empresa.</p>` : ''}
@@ -1706,7 +1789,7 @@ ACOES.cadEmp = d => {
     const cnpj = F.cnpj.value.replace(/\D/g, ''); const nome = F.nome.value.trim(); if (!nome) return;
     if (cnpj && n.empresas.some(y => y.cnpj === cnpj && (!x || y.id !== x.id))) { toast('Esse CNPJ já está cadastrado', 'err'); return; }
     const id = x ? x.id : uid();
-    const obj = { id, nome, cnpj, tipo: F.tipo.value, ret: F.ret.checked };
+    const obj = { ...(x || {}), id, nome, cnpj, tipo: F.tipo.value, ret: F.ret.checked, retAliq: +F.retAliq.value || 4, pix: F.pix.value.trim(), pixNome: F.pixNome.value.trim(), pixCidade: F.pixCidade.value.trim() };
     if (x) n.empresas = n.empresas.map(y => y.id === id ? obj : y); else n.empresas.push(obj);
     if (obj.tipo === 'matriz') n.empresas.forEach(y => { if (y.id !== id && y.tipo === 'matriz') y.tipo = 'filial'; });
     if (!n.empresas.some(y => y.tipo === 'matriz')) n.empresas[0].tipo = 'matriz';
@@ -1821,16 +1904,18 @@ function formVenda(k) {
     <label>Observação<textarea name="obs" rows="2">${esc(v.obs || '')}</textarea></label>
     <datalist id="dlCorr">${[...new Set(Object.values((S.vendas && S.vendas.lotes) || {}).map(o => o.corresp).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist>
     ${hist.length ? `<div class="lbl">Histórico</div><div class="tlist small">${hist.map(hh => `<div class="kv"><span>${dBR(hh.data)}</span><b>${esc(etapaNome(hh.etapa))}</b></div>`).join('')}</div>` : ''}
+    <div class="acts left rw"><button type="button" class="btn" id="vPl">${v.plano ? 'Plano de pagamento' : 'Criar plano de pagamento'}</button><button type="button" class="btn" id="vPo">${v.portal ? 'Link do cliente' : 'Gerar link para o cliente'}</button></div>
     <div class="acts"><a class="btn" href="#/obras/${encodeURIComponent(q)}/${encodeURIComponent(l)}" data-close>Ver lançamentos do lote</a><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary rw">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fV');
-  F.onsubmit = e => {
-    e.preventDefault();
-    const novo = { etapa: F.etapa.value, data: F.data.value, cliente: F.cliente.value.trim(), tel: F.tel.value.trim(), corresp: F.corresp.value.trim(), obs: F.obs.value.trim(), hist: v.hist || [] };
+  const guardar = () => {
+    const novo = { ...v, etapa: F.etapa.value, data: F.data.value, cliente: F.cliente.value.trim(), tel: F.tel.value.trim(), corresp: F.corresp.value.trim(), obs: F.obs.value.trim(), hist: v.hist || [] };
     if (novo.etapa !== v.etapa) novo.hist = [...novo.hist, { etapa: novo.etapa, data: novo.data }];
     S.vendas = S.vendas || { lotes: {} }; S.vendas.lotes = { ...(S.vendas.lotes || {}), [k]: novo };
     gravar(doc(db, 'config', 'vendas'), { lotes: { [k]: novo } }, { merge: true }).catch(onErroEscrita);
-    f.fechar(); toast('Lote ' + q + ' · ' + l + ' atualizado'); refreshView();
   };
+  F.querySelector('#vPl').onclick = () => { if (!somenteLeitura()) guardar(); f.fechar(); formPlano(k); };
+  F.querySelector('#vPo').onclick = () => { if (!somenteLeitura()) guardar(); f.fechar(); ACOES.portalLote({ k }); };
+  F.onsubmit = e => { e.preventDefault(); guardar(); f.fechar(); toast('Lote ' + q + ' · ' + l + ' atualizado'); refreshView(); };
 }
 
 /* =========================================================
@@ -2171,7 +2256,7 @@ async function imgParaPNG(url, w) {
 let relEmp = '';
 const nomeEmpPDF = emp => { const x = emp && empPorId(emp); return x ? x.nome + (x.cnpj ? ' · CNPJ ' + fCnpj(x.cnpj) : '') : (variasEmpresas() ? 'Grupo consolidado' : 'SFG Incorporadora'); };
 async function gerarPDF(m, emp) {
-  toast('Gerando PDF…');
+  toast('Gerando PDF…'); await carregarLib('pdf');
   const r = dadosRelatorio(m, emp);
   const P = s => String(s).replace(/\u2212/g, '-').replace(/[\u202f\u00a0]/g, ' ');
   const pdf = new jsPDF({ unit: 'pt', format: 'a4' }); const W = pdf.internal.pageSize.getWidth();
@@ -2214,6 +2299,8 @@ service cloud.firestore {
     function editor() { return dono() || (logado() && temAcesso() && request.auth.token.email in acesso().get('editores', [])); }
     function leitor() { return editor() || (logado() && temAcesso() && request.auth.token.email in acesso().get('leitores', [])); }
     match /config/acesso { allow read: if leitor(); allow write: if dono(); }
+    // Link de acompanhamento do cliente: qualquer pessoa com o código abre só aquele lote (sem listar os outros).
+    match /portal/{id} { allow get: if true; allow list: if leitor(); allow write: if editor(); }
     match /{col}/{id} {
       allow read: if leitor();
       allow write: if editor() && !(col == 'config' && id == 'acesso');
@@ -2362,7 +2449,8 @@ VIEWS.movimento = {
   }
 };
 ACOES.hfAba = d => { hfAba = d.v; refreshView(); };
-function exportarHistorico(d) {
+async function exportarHistorico(d) {
+  await carregarLib('xlsx');
   let aoa;
   if (d.tipo === 'destino') aoa = [['R$', 'Consolidado', ...d.cols.map((c, i) => c + (d.proj[i] ? ' (proj.)' : ''))], ...d.rows.map(([n, tot, vs]) => [n.trim(), tot === null ? '' : r2(tot), ...vs.map(r2)])];
   else aoa = [['Mês', 'Entradas', 'Geral / aportes', 'Saídas', 'Saldo acumulado', ...d.qs.flatMap(q => [q + ' entradas', q + ' saídas'])], ...d.meses.map((m, i) => [mesCurto(m) + (d.proj[i] ? ' (proj.)' : ''), r2(d.E_[i]), r2(d.geral[i]), r2(d.S_[i]), r2(d.acum[i]), ...d.qs.flatMap(q => [r2(d.Q[q].e[i]), r2(d.Q[q].s[i])])])];
@@ -2387,7 +2475,8 @@ const FLUXO_PADRAO = [
   ['v10', 'Digitalização', 'Venda e repasse', ['v9'], ''], ['v11', 'Corretagem', 'Venda e repasse', ['v10'], ''], ['v12', 'Termo de recebimento', 'Venda e repasse', ['v11'], 'Termo de Entrega']
 ].map(([id, nome, grupo, dep, doc]) => ({ id, nome, grupo, dep, doc, prazo: 0 }));
 const etapasFx = () => { try { const e = S.fluxo && S.fluxo.etapas && JSON.parse(S.fluxo.etapas); if (Array.isArray(e) && e.length) return e; } catch (e) { /* padrão */ } return FLUXO_PADRAO; };
-const regLote = (q, l) => { try { return JSON.parse(((S.fluxo && S.fluxo.lotes) || {})[q + '|' + l] || '{}'); } catch (e) { return {}; } };
+const regLote = (q, l) => { try { return JSON.parse((S.fluxoLotes || {})[q + '|' + l] || ((S.fluxo && S.fluxo.lotes) || {})[q + '|' + l] || '{}'); } catch (e) { return {}; } };
+const idBloco = s => encodeURIComponent(s).replace(/\./g, '%2E');
 const difDias = (a, b) => Math.round((new Date(b + 'T12:00') - new Date(a + 'T12:00')) / 864e5);
 function niveisFx(es) {
   const by = Object.fromEntries(es.map(e => [e.id, e])), nv = {};
@@ -2493,7 +2582,7 @@ ACOES.fxNo = d => {
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Lote</th><th class="l">Situação</th><th class="l">Conclusão</th><th>Duração</th></tr></thead><tbody>${xs.map(([q, l, x]) => `<tr class="click" data-act="fxIrLote" data-q="${esc(q)}" data-l="${esc(l)}"><td class="l">${esc(q)} · ${esc(l)}</td><td class="l"><span class="chip fx-${x.st}">${ST_FX[x.st]}</span></td><td class="l">${x.f ? dBR(x.f) : '—'}</td><td class="${x.atraso ? 'neg' : ''}">${x.ok ? fDias(x.dias) : x.corre !== null ? fDias(x.corre) + ' até agora' : '—'}</td></tr>`).join('')}</tbody></table></div>`, { largo: true });
 };
 ACOES.fxIrLote = d => { document.querySelector('.sheet [data-close]')?.click(); location.hash = '#/etapas/' + encodeURIComponent(d.q) + '/' + encodeURIComponent(d.l); };
-function salvarRegLote(q, l, reg) { const k = q + '|' + l; S.fluxo = S.fluxo || {}; S.fluxo.lotes = { ...(S.fluxo.lotes || {}), [k]: JSON.stringify(reg) }; gravar(doc(db, 'config', 'fluxo'), { lotes: { [k]: JSON.stringify(reg) } }, { merge: true }).catch(onErroEscrita); }
+function salvarRegLote(q, l, reg) { const k = q + '|' + l; S.fluxoLotes = { ...(S.fluxoLotes || {}), [k]: JSON.stringify(reg) }; gravar(doc(db, 'fluxoLotes', 'Q_' + idBloco(q)), { q, lotes: { [l]: JSON.stringify(reg) } }, { merge: true }).catch(onErroEscrita); }
 ACOES.fxEd = d => {
   const q = fxQ, l = fxL; if (!q || !l) return; const e = etapasFx().find(x => x.id === d.id); if (!e) return;
   const x = estadoFx(q, l)[e.id]; const r = regLote(q, l)[e.id] || {};
@@ -2778,7 +2867,7 @@ function notaDem() {
   return base + ' Contas a pagar e a receber incluem as parcelas em aberto na data que já tinham sido lançadas ou vencidas até ela.' + (demEmp ? ' Créditos e débitos com empresas do grupo aparecem quando um CNPJ pagou ou recebeu por conta bancária de outro.' : '');
 }
 async function pdfDemonstrativos() {
-  toast('Gerando PDF…');
+  toast('Gerando PDF…'); await carregarLib('pdf');
   const abaAtual = demAba; const ps = periodosDem(); const largo = ps.length > 2;
   const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: largo ? 'landscape' : 'portrait' }); const W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight();
   const NAVY = [11, 32, 70]; const P = s => String(s).replace(/−/g, '-').replace(/[  ]/g, ' ');
@@ -2823,23 +2912,25 @@ function histTxt(h) {
 VIEWS.historico = {
   titulo: 'Histórico e lixeira',
   refresh(el) {
-    const ev = [];
-    for (const t of S.list) for (const h of (t.hist || [])) ev.push({ ...h, t });
+    const ev = []; const vistos = new Set();
+    if (!S.histCompleto && !this._carregando) { this._carregando = true; carregarHistCompleto().then(() => refreshView()).catch(e => console.warn(e)); }
+    for (const x of (S.histCompleto || [])) { const t = S.byId.get(x.t) || { id: x.t, item: x.item || '(excluído)', valor: x.valor || 0 }; vistos.add(x.t + '_' + x.em); ev.push({ ...x, t, morto: !S.byId.has(x.t) }); }
+    for (const t of S.list) for (const h of (t.hist || [])) if (!vistos.has(t.id + '_' + h.em)) ev.push({ ...h, t });
     const lx = Object.entries((S.lixeira && S.lixeira.items) || {}).map(([id, v]) => { try { const o = JSON.parse(v); return { id, ...o }; } catch (e) { return null; } }).filter(Boolean).sort((a, b) => b.em - a.em);
-    for (const x of lx) ev.push({ em: x.em, por: x.por, a: 'excluiu', t: x.t, morto: true });
+    for (const x of lx) if (!vistos.has(x.id + '_' + x.em)) ev.push({ em: x.em, por: x.por, a: 'excluiu', t: x.t, morto: true });
     ev.sort((a, b) => b.em - a.em);
     const users = [...new Set(ev.map(e => e.por).filter(Boolean))];
     if (histU && !users.includes(histU)) histU = '';
     const vis = ev.filter(e => !histU || e.por === histU).slice(0, 300);
-    el.innerHTML = `<div class="filtros card"><label class="tgl">Usuário <select id="hU">${opts(users.map(u => [u, u]), histU, 'Todos')}</select></label><span class="muted small">Cada lançamento guarda as últimas 25 mudanças: quem fez, quando e o que mudou. O que é excluído fica 90 dias na lixeira.</span></div>
+    el.innerHTML = `<div class="filtros card"><label class="tgl">Usuário <select id="hU">${opts(users.map(u => [u, u]), histU, 'Todos')}</select></label><span class="muted small">Toda mudança fica registrada: quem fez, quando e o que mudou. O que é excluído fica 90 dias na lixeira.</span></div>
       <div class="grid lg"><div class="card"><h2>Atividade recente</h2><div class="tlist">${vis.map(e => `<div class="tr hist-row ${e.morto ? '' : 'click'}" ${e.morto ? '' : `data-act="abrir" data-id="${esc(e.t.id)}"`}><div class="td-main"><div class="td-item">${esc(e.t.item)}</div><div class="td-meta">${histTxt(e)}</div></div><div class="td-val"><b class="${cls(e.t.valor)}">${brl2(e.t.valor)}</b></div></div>`).join('') || '<p class="muted pad">Nenhuma alteração registrada ainda. O histórico começa a ser gravado a partir de agora.</p>'}</div></div>
       <div class="card"><h2>Lixeira <span class="muted small">${lx.length} item(ns)</span>${lx.length ? '<button class="btn sm danger ghost rw" data-act="lxVazia">Esvaziar</button>' : ''}</h2><div class="tlist">${lx.slice(0, 200).map(x => `<div class="tr"><div class="td-main"><div class="td-item">${esc(x.t.item)}</div><div class="td-meta"><span>${dBR(x.t.venc)}</span><span>excluído por ${quem(x.por)} em ${quando(x.em)}</span></div></div><div class="td-val"><b class="${cls(x.t.valor)}">${brl2(x.t.valor)}</b><button class="btn sm rw" data-act="lxRest" data-id="${esc(x.id)}">Restaurar</button></div></div>`).join('') || '<p class="muted pad">A lixeira está vazia.</p>'}</div></div></div>`;
     $('#hU', el).onchange = e => { histU = e.target.value; this.refresh(el); };
   }
 };
 let histU = '';
-ACOES.lxRest = d => { const v = S.lixeira?.items?.[d.id]; if (!v) return; const o = JSON.parse(v); if (S.byId.has(d.id)) { toast('Esse lançamento já existe.', 'err'); return; } salvarTitulos([o.t], { acao: 'restaurou' }); gravar(doc(db, 'config', 'lixeira'), { items: { [d.id]: deleteField() } }, { merge: true }).catch(onErroEscrita); toast('Lançamento restaurado'); };
-ACOES.lxVazia = async () => { const ks = Object.keys(S.lixeira?.items || {}); if (ks.length && await confirmar(`Apagar definitivamente os <b>${ks.length}</b> itens da lixeira?`, 'Apagar')) { gravar(doc(db, 'config', 'lixeira'), { items: {} }).catch(onErroEscrita); toast('Lixeira esvaziada'); } };
+ACOES.lxRest = d => { const v = S.lixeira?.items?.[d.id]; if (!v) return; const o = JSON.parse(v); if (S.byId.has(d.id)) { toast('Esse lançamento já existe.', 'err'); return; } salvarTitulos([o.t], { acao: 'restaurou' }); gravar(doc(db, 'lixeira', (S.lixeiraOnde || {})[d.id] || hoje().slice(0, 7)), { items: { [d.id]: deleteField() } }, { merge: true }).catch(onErroEscrita); toast('Lançamento restaurado'); };
+ACOES.lxVazia = async () => { const ks = Object.keys(S.lixeira?.items || {}); if (ks.length && await confirmar(`Apagar definitivamente os <b>${ks.length}</b> itens da lixeira?`, 'Apagar')) { for (const b of new Set(Object.values(S.lixeiraOnde || {}))) gravar(doc(db, 'lixeira', b), { items: {} }).catch(onErroEscrita); toast('Lixeira esvaziada'); } };
 
 VIEWS.usuarios = {
   titulo: 'Usuários e acesso',
@@ -2863,7 +2954,7 @@ ACOES.usrDel = async d => { const a = S.acesso || {}; if (!(await confirmar(`Rem
 /* ---------- Mais (celular) ---------- */
 VIEWS.mais = {
   titulo: 'Mais',
-  refresh(el) { el.innerHTML = `<div class="card"><h2>Aparência</h2>${seletorTema()}</div>` + NAV.filter(([k]) => !['inicio', 'pagar', 'receber', 'obras'].includes(k)).map(([k, n]) => k === '#' ? `<div class="eyebrow" style="margin:14px 4px 6px">${n}</div>` : `<a class="menu-item" href="#/${k}">${ic(k)}<span>${n}</span></a>`).join(''); }
+  refresh(el) { el.innerHTML = `<button class="menu-item busca-item" data-act="busca">${ic('busca')}<span>Buscar ou perguntar</span></button><div class="card"><h2>Aparência</h2>${seletorTema()}</div>` + NAV.filter(([k]) => !['inicio', 'pagar', 'receber', 'obras'].includes(k)).map(([k, n, ar]) => k === '#' ? `<div class="eyebrow" style="margin:14px 4px 6px">${n}</div>` : `<a class="menu-item" href="#/${k}">${ic(ar ? 'area_' + ar : k)}<span>${n}</span>${ar ? `<small class="muted">${AREAS[ar][1].map(x => x[1]).join(', ')}</small>` : ''}</a>`).join(''); }
 };
 
 /* ---------- Dados ---------- */
@@ -2874,11 +2965,12 @@ VIEWS.dados = {
       <div class="card"><h2>Exportar</h2><p class="muted">Gera uma planilha com Extrato, Contas a Pagar, Contas a Receber, Previsto e Checklist. Faça isso de tempos em tempos como backup.</p><div class="acts left"><button class="btn primary" id="bXls">Exportar Excel</button><button class="btn" id="bJson">Backup completo (.json)</button></div></div>
       <div class="card"><h2>Importar</h2><p class="muted">Importa a planilha <b>SFG Projeto</b> (abas Extrato, Contas a Pagar, Contas a Receber, Previsto e Checklist) ou um backup .json. <b>Substitui todos os dados atuais.</b> Precisa de internet.</p>
         <div class="acts left"><label class="btn file">Importar planilha .xlsx<input type="file" id="iXls" accept=".xlsx,.xlsm" hidden></label><label class="btn file">Restaurar backup .json<input type="file" id="iJson" accept=".json,application/json" hidden></label></div><p id="impStatus" class="muted"></p></div>
+      ${cardBackup()}
       ${cardDrive()}
       ${cardAgenda()}
       <div class="card"><h2>Conta</h2><div class="kv"><span>Usuário</span><b>${esc(S.user?.email || '')}</b></div><div class="kv"><span>Lançamentos</span><b>${S.list.length.toLocaleString('pt-BR')}</b></div><div class="kv"><span>Versão</span><b>${VERSAO}</b></div><div class="acts left"><button class="btn danger ghost" id="bSair">Sair deste aparelho</button></div></div>
     </div>`;
-    $('#bXls', el).onclick = exportarExcel; $('#bJson', el).onclick = exportarJSON;
+    $('#bXls', el).onclick = () => exportarExcel().catch(e => toast(e.message, 'err')); $('#bJson', el).onclick = () => exportarJSON();
     $('#iXls', el).onchange = e => importarArquivo(e.target.files[0], 'xlsx');
     $('#iJson', el).onchange = e => importarArquivo(e.target.files[0], 'json');
     $('#bSair', el).onclick = async () => { if (await confirmar('Sair? Alterações que ainda não sincronizaram podem se perder se você sair sem internet.', 'Sair')) signOut(auth); };
@@ -2889,7 +2981,8 @@ async function baixarArquivo(blob, nome) {
   try { const file = new File([blob], nome, { type: blob.type }); if (navigator.canShare && navigator.canShare({ files: [file] }) && /iPhone|iPad|Android/i.test(navigator.userAgent)) { await navigator.share({ files: [file], title: nome }); return; } } catch (e) { if (e.name === 'AbortError') return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
 }
-function exportarExcel() {
+async function exportarExcel(baixar = true) {
+  await carregarLib('xlsx');
   const cab = ['Item', 'R$', 'Juros e Multa', 'NF', 'Local', 'Quadra', 'Lote', 'Destino', 'Data', 'Vencimento', 'Conta', 'Fornecedor', 'Observação', 'Quantidade', 'Unidade', 'Nº NF', 'Anexo (Drive)', 'Empresa', 'CNPJ', 'Conferência CNPJ'];
   const lin = t => [t.item, t.valor, t.juros || 0, !!t.nf, t.local || E().local, t.quadra, isNaN(+t.lote) || t.lote === '' ? t.lote : +t.lote, t.destino, pago(t) ? (t.pag || t.venc) : t.venc, t.venc, t.conta || '', t.forn || '', t.obs || '', t.qtd || '', t.unid || '', t.nfNum || '', anexosDe(t).map(a => a.link).filter(Boolean).join(' '), empPorId(empT(t))?.nome || '', fCnpj(empPorId(empT(t))?.cnpj || ''), !variasEmpresas() ? '' : empDiverge(t) ? 'diferente da obra' : empDef(t) ? 'ok' : 'não definido'];
   const toDate = r => { for (const i of [8, 9]) if (r[i]) { const [y, m, d] = r[i].split('-').map(Number); r[i] = new Date(Date.UTC(y, m - 1, d)); } return r; };
@@ -2904,11 +2997,25 @@ function exportarExcel() {
   const docs = (S.checklist && S.checklist.docs) || DOCS_PADRAO;
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Local', 'Quadra', 'Lote', ...docs], ...qs.flatMap(q => lotesDe(q).map(l => { const s = S.checklist?.lotes?.[q + '|' + l] || ''; return [E().local, q, l, ...docs.map((_, i) => s[i] === '1')]; }))]), 'Checklist');
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  baixarArquivo(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `SFG Financeiro ${hoje()}.xlsx`);
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  if (baixar) baixarArquivo(blob, `SFG Financeiro ${hoje()}.xlsx`);
+  return blob;
 }
-function exportarJSON() {
+/* Módulos registram aqui o que entra no backup completo e como restaurar. */
+const BACKUP_EXTRA = [];
+const CONFIG_EXTRA = [], BLOCOS_EXTRA = [];
+/* Um documento em config/ que o app escuta e guarda no backup. */
+function usarConfig(nome) { if (!CONFIG_EXTRA.includes(nome)) CONFIG_EXTRA.push(nome); BACKUP_EXTRA.push({ nome: 'config:' + nome, get: () => S[nome] || null, set: (v, ops) => { if (v) ops.push(b => b.set(doc(db, 'config', nome), v)); } }); }
+/* Uma coleção em blocos que o app escuta e guarda no backup. */
+function usarBlocos(col, aoMudar) { BLOCOS_EXTRA.push([col, aoMudar]); BACKUP_EXTRA.push({ nome: 'col:' + col, get: () => S['raw_' + col] || null, set: (v, ops) => { if (v) for (const id in v) ops.push(b => b.set(doc(db, col, id), v[id])); } }); }
+['recorrencias', 'fluxo', 'docsdrive', 'agenda'].forEach(n => BACKUP_EXTRA.push({ nome: 'config:' + n, get: () => S[n] || null, set: (v, ops) => { if (v) ops.push(b => b.set(doc(db, 'config', n), v)); } }));
+['fluxoLotes', 'docsArq'].forEach(c => BACKUP_EXTRA.push({ nome: 'col:' + c, get: () => S['raw_' + c] || null, set: (v, ops) => { if (v) for (const id in v) ops.push(b => b.set(doc(db, c, id), v[id])); } }));
+function exportarJSON(baixar = true) {
   const data = { formato: 'sfg-financeiro', versao: 1, exportado: new Date().toISOString(), estrutura: S.estrutura, orcamento: S.orcamento, checklist: S.checklist, vendas: S.vendas, obras: S.obras, fornecedores: S.fornecedores, simulacoes: S.simulacoes, titulos: S.list.map(limpar) };
-  baixarArquivo(new Blob([JSON.stringify(data)], { type: 'application/json' }), `SFG Financeiro backup ${hoje()}.json`);
+  data.extras = {}; for (const x of BACKUP_EXTRA) { try { data.extras[x.nome] = x.get(); } catch (e) { console.warn(e); } }
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  if (baixar) baixarArquivo(blob, `SFG Financeiro backup ${hoje()}.json`);
+  return blob;
 }
 
 /* Leitura da planilha SFG Projeto */
@@ -2979,7 +3086,7 @@ async function importarArquivo(file, tipo) {
   try {
     st.textContent = 'Lendo arquivo…';
     let data;
-    if (tipo === 'xlsx') data = lerPlanilha(new Uint8Array(await file.arrayBuffer()));
+    if (tipo === 'xlsx') { await carregarLib('xlsx'); } if (tipo === 'xlsx') data = lerPlanilha(new Uint8Array(await file.arrayBuffer()));
     else { data = JSON.parse(await file.text()); if (data.formato !== 'sfg-financeiro') throw new Error('Arquivo não é um backup do SFG Financeiro.'); }
     const pagos = data.titulos.filter(pago).length;
     const ok = await confirmar(`Encontrei <b>${data.titulos.length.toLocaleString('pt-BR')}</b> lançamentos (${pagos.toLocaleString('pt-BR')} realizados, ${(data.titulos.length - pagos).toLocaleString('pt-BR')} em aberto)${data.estrutura ? `, ${data.estrutura.quadras.length} quadras` : ''}.<br><br><b>Isso substitui todos os dados atuais do sistema.</b> Continuar?`, 'Importar e substituir');
@@ -3000,6 +3107,7 @@ async function substituirTudo(data) {
   if (data.orcamento) ops.push(b => b.set(doc(db, 'config', 'orcamento'), data.orcamento));
   if (data.checklist) ops.push(b => b.set(doc(db, 'config', 'checklist'), data.checklist));
   for (const k of ['vendas', 'obras', 'fornecedores', 'simulacoes']) if (data[k]) ops.push(b => b.set(doc(db, 'config', k), data[k]));
+  for (const x of BACKUP_EXTRA) if (data.extras && data.extras[x.nome] !== undefined) { try { x.set(data.extras[x.nome], ops); } catch (e) { console.warn(e); } }
   for (let i = 0; i < ops.length; i += 20) { const b = writeBatch(db); ops.slice(i, i + 20).forEach(f => f(b)); await b.commit(); }
 }
 
@@ -3014,7 +3122,7 @@ if ('serviceWorker' in navigator && !EMU) {
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => refreshView());
 if (!CONFIGURADO) telaNaoConfigurado();
 else onAuthStateChanged(auth, u => {
-  if (u) { S.user = u; iniciarDados(); montarShell(); setTimeout(() => sincronizarDrive(false), 6000); }
+  if (u) { S.user = u; iniciarDados(); montarShell(); setTimeout(() => sincronizarDrive(false), 6000); setTimeout(() => carregarLib('chart').catch(() => {}), 2500); }
   else { S.user = null; pararDados(); document.removeEventListener('click', onClick); atual = { nome: null, args: [], view: null }; telaLogin(); }
 });
 window.__sfg = { S, hoje };

@@ -8,6 +8,8 @@ service cloud.firestore {
     function editor() { return dono() || (logado() && temAcesso() && request.auth.token.email in acesso().get('editores', [])); }
     function leitor() { return editor() || (logado() && temAcesso() && request.auth.token.email in acesso().get('leitores', [])); }
     match /config/acesso { allow read: if leitor(); allow write: if dono(); }
+    // Link de acompanhamento do cliente: qualquer pessoa com o código abre só aquele lote (sem listar os outros).
+    match /portal/{id} { allow get: if true; allow list: if leitor(); allow write: if editor(); }
     match /{col}/{id} {
       allow read: if leitor();
       allow write: if editor() && !(col == 'config' && id == 'acesso');

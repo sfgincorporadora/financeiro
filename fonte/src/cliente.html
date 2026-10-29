@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Acompanhe seu imóvel · SFG Incorporadora</title>
+<meta name="theme-color" content="#0B2046">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+@font-face{font-family:Archivo;src:url(fonts/archivo-var.woff2) format('woff2');font-weight:100 900;font-stretch:62% 125%;font-display:swap}
+:root{--navy:#0B2046;--bg:#F6F7F9;--card:#fff;--ink:#18202E;--muted:#5E6A80;--line:#DCE1E8;--ok:#17714F;--okbg:#E4F2EC;--warn:#8A5A0E;--warnbg:#FBF3E4}
+@media (prefers-color-scheme:dark){:root{--bg:#0D131E;--card:#141C2A;--ink:#E7ECF4;--muted:#9BA8BC;--line:#263247;--ok:#4BC08F;--okbg:#15352A;--warn:#E8B864;--warnbg:#2B2213}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Archivo,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{background:var(--navy);color:#fff;padding:22px 18px 46px}header img{height:34px;display:block}header h1{font-size:23px;margin:18px 0 2px;font-stretch:108%}header p{margin:0;color:#B9C6DC;font-size:14px}
+main{max-width:640px;margin:-30px auto 40px;padding:0 14px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}.card h2{font-size:15px;margin:0 0 10px}
+.etapa{font-size:20px;font-weight:650;margin:2px 0}.muted{color:var(--muted)}.small{font-size:13px}
+.passos{list-style:none;margin:0;padding:0}.passos li{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line)}.passos li:last-child{border:0}
+.b{width:20px;height:20px;border-radius:50%;flex:none;margin-top:2px;border:2px solid var(--line)}.ok .b{background:var(--ok);border-color:var(--ok)}.andamento .b{border-color:var(--warn);background:var(--warnbg)}
+.passos small{display:block;color:var(--muted)}.barra{height:10px;border-radius:6px;background:var(--line);overflow:hidden;margin:8px 0}.barra i{display:block;height:100%;background:var(--ok)}
+.docs{display:flex;flex-wrap:wrap;gap:6px}.docs span{font-size:12.5px;padding:3px 9px;border-radius:99px;background:var(--bg);border:1px solid var(--line)}.docs span.ok{background:var(--okbg);color:var(--ok);border-color:transparent}
+.parc{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}.parc:last-child{border:0}.parc b{font-variant-numeric:tabular-nums}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
+footer{text-align:center;color:var(--muted);font-size:12px;margin:10px 0 30px}.erro{text-align:center;padding:40px 10px}
+</style>
+</head>
+<body>
+<header><img src="icons/logo-branco-incorporadora.svg" alt="SFG Incorporadora"><h1 id="tit">Acompanhe seu imóvel</h1><p id="sub">Carregando…</p></header>
+<main id="m"></main>
+<script>
+(function () {
+  var c = new URLSearchParams(location.search).get('c') || '';
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (x) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[x]; }); };
+  var dBR = function (d) { return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : ''; };
+  var brl = function (v) { return (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); };
+  function falha(msg) { document.getElementById('sub').textContent = ''; document.getElementById('m').innerHTML = '<div class="card erro">' + esc(msg) + '</div>'; }
+  function mostrar(d, quando) {
+    document.getElementById('tit').textContent = (d.cliente ? 'Olá, ' + d.cliente + '!' : 'Acompanhe seu imóvel');
+    document.getElementById('sub').textContent = d.obra + ' · Quadra ' + d.quadra + ', lote ' + d.lote;
+    var h = '<div class="card"><span class="muted small">Situação do seu processo</span><div class="etapa">' + esc(d.etapa) + '</div>' + (d.etapaData ? '<span class="muted small">desde ' + dBR(d.etapaData) + '</span>' : '') + '</div>';
+    if (d.venda && d.venda.length) h += '<div class="card"><h2>Etapas do repasse</h2><ol class="passos">' + d.venda.map(function (p) { return '<li class="' + p.s + '"><span class="b"></span><span>' + esc(p.n) + '<small>' + (p.s === 'ok' ? 'concluída' + (p.d ? ' em ' + dBR(p.d) : '') : p.s === 'andamento' ? 'em andamento' : 'a fazer') + '</small></span></li>'; }).join('') + '</ol></div>';
+    if (d.obraPct !== null && d.obraPct !== undefined) h += '<div class="card"><h2>Obra</h2><div class="barra"><i style="width:' + Math.round(d.obraPct * 100) + '%"></i></div><span class="small">' + Math.round(d.obraPct * 100) + '% das etapas concluídas' + (d.obraAtual ? ' · agora: ' + esc(d.obraAtual) : '') + '</span></div>';
+    if (d.docs && d.docs.length) h += '<div class="card"><h2>Documentos</h2><div class="docs">' + d.docs.map(function (x) { return '<span class="' + (x.ok ? 'ok' : '') + '">' + (x.ok ? '✓ ' : '') + esc(x.n) + '</span>'; }).join('') + '</div></div>';
+    if (d.parcelas && d.parcelas.length) h += '<div class="card"><h2>Próximas parcelas</h2>' + d.parcelas.map(function (p, i) { return '<div class="parc"><span>' + esc(p.desc) + '<br><span class="muted small">vence ' + dBR(p.d) + '</span></span><b>' + brl(p.v) + '</b>' + (p.pix ? '<button data-i="' + i + '">Copiar PIX</button>' : '') + '</div>'; }).join('') + (d.recebido ? '<p class="muted small">Já recebido: ' + brl(d.recebido) + '</p>' : '') + '</div>';
+    document.getElementById('m').innerHTML = h;
+    document.querySelectorAll('[data-i]').forEach(function (b) { b.onclick = function () { var t = d.parcelas[+b.dataset.i].pix; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { b.textContent = 'Copiado!'; }, function () { prompt('Copie o código PIX:', t); }); }; });
+    document.body.insertAdjacentHTML('beforeend', '<footer>' + esc(d.empresa) + (quando ? ' · atualizado em ' + new Date(quando).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '') + '</footer>');
+  }
+  if (!/^[a-z0-9]{10,40}$/.test(c)) { falha('Link inválido. Peça um novo link à SFG Incorporadora.'); return; }
+  try { var fake = (location.hostname === '127.0.0.1') && JSON.parse(localStorage.getItem('fakefs') || 'null'); if (fake) { var x = fake['portal/' + c]; if (!x) { falha('Este link foi desativado ou não existe.'); return; } mostrar(JSON.parse(x.json), x.atualizado); return; } } catch (e) { }
+  fetch('https://firestore.googleapis.com/v1/projects/__PROJETO__/databases/(default)/documents/portal/' + c + '?key=__CHAVE__')
+    .then(function (r) { if (r.status === 404 || r.status === 403) throw new Error('fora'); if (!r.ok) throw new Error('rede'); return r.json(); })
+    .then(function (j) { mostrar(JSON.parse(j.fields.json.stringValue), j.fields.atualizado && j.fields.atualizado.stringValue); })
+    .catch(function (e) { falha(e.message === 'fora' ? 'Este link foi desativado ou não existe.' : 'Não foi possível carregar agora. Verifique a internet e tente de novo.'); });
+})();
+</script>
+</body>
+</html>
