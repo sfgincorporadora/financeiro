@@ -388,6 +388,7 @@ const IC = {
   cronograma: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   vendas: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   simulador: '<path d="M5 3h14v18H5zM8 7h8M8 11h2M12 11h2M8 15h2M12 15h2M8 18h2M12 18h2M16 11v7"/>',
+  socios: '<path d="M21.2 15.9A10 10 0 1 1 8 2.8M22 12A10 10 0 0 0 12 2v10z"/>',
   empresas: '<path d="M3 21h18M5 21V5l7-3v19M12 9h7v12M8 8h1M8 12h1M8 16h1M15 13h1M15 17h1"/>',
   sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
@@ -426,7 +427,7 @@ const areaDe = nome => Object.keys(AREAS).find(a => AREAS[a][1].some(x => x[0] =
 const NAV = [
   ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['@relatorios'],
   ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['vendas', 'Vendas e repasses'], ['@suprimentos'], ['@planejamento'], ['@documentos'],
-  ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['empresas', 'Empresas (CNPJ)'], ['arrumar', 'Revisar e classificar'], ['cadastros', 'Cadastros'], ['@sistema']
+  ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['empresas', 'Empresas (CNPJ)'], ['socios', 'Sócios e participações'], ['arrumar', 'Revisar e classificar'], ['cadastros', 'Cadastros'], ['@sistema']
 ].map(([k, n]) => k[0] === '@' ? [AREAS[k.slice(1)][1][0][0], AREAS[k.slice(1)][0], k.slice(1)] : [k, n]);
 const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg', LOGO_COMPLETO = 'icons/logo-azul-incorporadora.svg';
 const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Receber'], ['obras', 'Obras'], ['mais', 'Mais']];
