@@ -560,7 +560,7 @@ const campoObra = (sel, empSel) => {
   return (c.length === 2 ? `<div class="g2">${c.join('')}</div>` : c.join('')) + (variasEmpresas() ? '<p class="hint-data" id="empHint"></p>' : '');
 };
 const obraDoForm = F => F.ambito && F.ambito.value === 'empresa' ? '' : F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : E().obras[0]);
-const TIPOS_APORTE = [['capital', 'Capital do sócio (integralização)'], ['emprestimo', 'Empréstimo do sócio (a devolver)'], ['intragrupo', 'Entre empresas do grupo (matriz ↔ filial)'], ['retirada', 'Retirada / distribuição de lucro'], ['devolucao', 'Devolução de empréstimo ao sócio'], ['transferencia', 'Transferência entre contas da mesma empresa'], ['terceiro', 'Empréstimo / financiamento de terceiros']];
+const TIPOS_APORTE = [['capital', 'Capital do sócio (integralização)'], ['emprestimo', 'Empréstimo do sócio (a devolver)'], ['intragrupo', 'Entre empresas do grupo (matriz ↔ filial)'], ['retirada', 'Retirada / distribuição de lucro'], ['devolucao', 'Devolução de empréstimo ao sócio'], ['transferencia', 'Transferência entre contas da mesma empresa'], ['terceiro', 'Empréstimo / financiamento de terceiros'], ['conversivel', 'Dívida conversível (vira participação)']];
 const tipoAporteNome = k => (TIPOS_APORTE.find(x => x[0] === k) || [k, k])[1];
 const campoAporte = (sel, dest) => `<label id="rowAporte" class="${secaoDe(dest || '') === 'aporte' ? '' : 'hidden'}">Tipo de aporte<select name="aporteTipo">${opts(TIPOS_APORTE, sel || '', 'Escolha o tipo…')}</select></label>`;
 const sincAporte = F => { const r = F.querySelector('#rowAporte'); if (r) r.classList.toggle('hidden', secaoDe(F.destino.value) !== 'aporte'); };
@@ -953,7 +953,7 @@ function detalhe(t) {
     <div class="resumo"><b>${esc(t.item)}</b><div class="big ${cls(t.valor)}">${brl2(t.valor)}</div>
       ${pago(t) ? `<span class="chip ok">Pago em ${dBR(t.pag)} · ${esc(t.conta || '')}</span>` : venc ? `<span class="chip bad">Vencida em ${dBR(t.venc)}</span>` : `<span class="chip warn">Vence em ${dBR(t.venc)}</span>`}</div>
     <dl class="dl">
-      <dt>Destino</dt><dd>${esc(t.destino)}${t.aporteTipo ? ' · ' + esc(tipoAporteNome(t.aporteTipo)) : ''}</dd><dt>Pertence a</dt><dd>${ehEmpresa(t) ? 'Empresa (administrativo)' : `${esc(obraT(t))} · quadra ${esc(t.quadra || '-')} · lote ${esc(t.lote || '-')}`}${variasEmpresas() ? ' · ' + esc(empPorId(empT(t))?.nome || '') : ''}</dd>
+      <dt>Destino</dt><dd>${esc(t.destino)}${t.aporteTipo ? ' · ' + esc(tipoAporteNome(t.aporteTipo)) : ''}${t.conversao ? ` · convertida em participação em ${dBR(t.conversao)}` : ''}</dd><dt>Pertence a</dt><dd>${ehEmpresa(t) ? 'Empresa (administrativo)' : `${esc(obraT(t))} · quadra ${esc(t.quadra || '-')} · lote ${esc(t.lote || '-')}`}${variasEmpresas() ? ' · ' + esc(empPorId(empT(t))?.nome || '') : ''}</dd>
       <dt>Vencimento</dt><dd>${dBR(t.venc)}</dd>${t.juros ? `<dt>Juros / multa</dt><dd class="neg">${brl2(t.juros)}</dd>` : ''}
       ${t.forn ? `<dt>Fornecedor</dt><dd>${esc(t.forn)}</dd>` : ''}<dt>Nota fiscal</dt><dd>${t.nf ? (t.nfNum ? 'Nº ' + esc(t.nfNum) : 'Sim') : 'Não'}</dd>
       ${t.obs ? `<dt>Observação</dt><dd>${esc(t.obs)}</dd>` : ''}${grupo.length > 1 ? `<dt>Grupo</dt><dd>${grupo.length} lançamentos (${grupo.filter(pago).length} pagos)</dd>` : ''}
@@ -964,7 +964,7 @@ function detalhe(t) {
     ${(t.hist || []).length ? `<details class="hist"><summary>Histórico de alterações</summary><ol>${t.hist.slice().reverse().map(h => `<li>${histTxt(h)}</li>`).join('')}</ol><button class="btn link sm" data-act="histT" data-id="${esc(t.id)}">Ver histórico completo</button></details>` : ''}
     <div class="acts wrap">
       ${pago(t) ? `<button class="btn" id="dEst">Estornar baixa</button>` : `<button class="btn primary" id="dBx">${t.valor < 0 ? 'Registrar pagamento' : 'Registrar recebimento'}</button>`}
-      ${!pago(t) && t.valor > 0 ? `<button class="btn" data-act="pix" data-id="${esc(t.id)}">Cobrar por PIX</button>` : ''}<button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
+      ${!pago(t) && t.valor > 0 ? `<button class="btn" data-act="pix" data-id="${esc(t.id)}">Cobrar por PIX</button>` : ''}${t.aporteTipo === 'conversivel' && t.valor > 0 && !t.conversao ? `<button class="btn" data-act="converter" data-id="${esc(t.id)}">Converter em participação</button>` : ''}<button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
       ${grupo.filter(x => !pago(x)).length > 1 ? `<button class="btn danger ghost" id="dDelG">Excluir ${grupo.filter(x => !pago(x)).length} em aberto do grupo</button>` : ''}
     </div>`);
   const on = (id, fn) => { const b = f.el.querySelector('#' + id); if (b) b.onclick = fn; };
@@ -2813,7 +2813,7 @@ function balancoDe(L, emp, D) {
   const dispon = emp ? ini + sum(S.list.filter(t => pago(t) && dt(t) <= D && nomes.has(t.conta || '')), v) : caixaTeo;
   const existia = t => t.venc <= D || (t.criado && isoLocal(new Date(t.criado)) <= D);
   const ab = L.filter(t => (!pago(t) || dt(t) > D) && existia(t));
-  const lim = addDays(D, 365); const ap0 = t => secaoDe(t.destino) === 'aporte'; const emprest = t => ap0(t) && ['emprestimo', 'devolucao', 'terceiro'].includes(t.aporteTipo); const ap = t => ap0(t) && !emprest(t);
+  const lim = addDays(D, 365); const ap0 = t => secaoDe(t.destino) === 'aporte'; const emprest = t => ap0(t) && (['emprestimo', 'devolucao', 'terceiro'].includes(t.aporteTipo) || (t.aporteTipo === 'conversivel' && !(t.conversao && t.conversao <= D))); const ap = t => ap0(t) && !emprest(t);
   const o = {
     dispon, inter: caixaTeo - dispon,
     recCP: sum(ab.filter(t => t.valor > 0 && t.venc <= lim), t => t.valor), recLP: sum(ab.filter(t => t.valor > 0 && t.venc > lim), t => t.valor),
@@ -2881,7 +2881,7 @@ function linhasDem() {
     linha('  Contas a pagar (até 12 meses)', b => b.pagCP, 'item'),
     linha('  Contas a pagar (após 12 meses)', b => b.pagLP, 'item'),
     ...(demEmp ? [linha('  Débitos com empresas do grupo', b => Math.max(0, -b.inter), 'item')] : []),
-    linha('  Empréstimos de sócios e terceiros', b => b.emprest, 'item'),
+    linha('  Empréstimos e dívidas conversíveis', b => b.emprest, 'item'),
     linha('PATRIMÔNIO LÍQUIDO', b => b.pl, 'grand'),
     linha('  Capital inicial (saldo inicial das contas)', b => b.capital, 'item'),
     linha('  Aportes de capital e retiradas', b => b.aportes, 'item'),

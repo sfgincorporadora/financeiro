@@ -166,7 +166,7 @@ function revNF(box) {
 function revAporte(box) {
   const ts = candidatosRevisar('aporte'); const gs = {}; for (const t of ts) (gs[chaveGrupo(t) + (t.valor > 0 ? '+' : '-')] = gs[chaveGrupo(t) + (t.valor > 0 ? '+' : '-')] || []).push(t);
   const lista = Object.values(gs).map(xs => ({ xs, tot: sum(xs, t => t.valor) })).sort((a, b) => Math.abs(b.tot) - Math.abs(a.tot));
-  const sug = g => { const s = normTxt(g.xs[0].item); return /transf/.test(s) ? 'transferencia' : /emprest/.test(s) ? (g.tot > 0 ? 'emprestimo' : 'devolucao') : /retirad|distrib|lucro/.test(s) ? 'retirada' : /filial|matriz|ret /.test(s) ? 'intragrupo' : g.tot > 0 ? 'capital' : 'retirada'; };
+  const sug = g => { const s = normTxt(g.xs[0].item); return /conversiv|mutuo convers/.test(s) ? 'conversivel' : /transf/.test(s) ? 'transferencia' : /emprest/.test(s) ? (g.tot > 0 ? 'emprestimo' : 'devolucao') : /retirad|distrib|lucro/.test(s) ? 'retirada' : /filial|matriz|ret /.test(s) ? 'intragrupo' : g.tot > 0 ? 'capital' : 'retirada'; };
   box.innerHTML = `<div class="card"><h2>Aportes sem tipo <span class="muted small">${ts.length} lançamento(s)</span></h2>
     <p class="muted small">Aporte não é receita: é dinheiro que entra ou sai do caixa por decisão dos sócios ou entre empresas do grupo. O tipo define onde ele aparece no BP e na DFC: <b>capital</b> aumenta o patrimônio líquido; <b>empréstimo do sócio</b> é uma dívida da empresa; <b>entre empresas do grupo</b> se anula no consolidado; <b>retirada</b> reduz o patrimônio.</p>
     <div class="arr-lista">${lista.map((g, i) => `<div class="arr-g"><div class="arr-txt"><b>${esc(g.xs[0].item)}</b><small>${g.xs.length} lançamento(s) · <b class="${cls(g.tot)}">${brl2(g.tot)}</b> · ${dBR(g.xs[0].pag || g.xs[0].venc)}</small></div><select data-g="${i}">${opts(TIPOS_APORTE, sug(g))}</select><button class="btn sm rw" data-ap="${i}">Aplicar</button></div>`).join('') || '<p class="muted">Todos os aportes têm tipo.</p>'}</div></div>`;
@@ -225,3 +225,18 @@ function revRateio(box) {
     <div><div class="lbl">Lotes que mais receberam</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Lote</th><th>Administração rateada</th></tr></thead><tbody>${top.map(([k, v]) => { const [q, l] = k.split('|'); return `<tr class="click" data-act="ir" data-href="#/obras/${encodeURIComponent(q)}/${encodeURIComponent(l)}"><td class="l">${esc(q)} ${esc(l)}</td><td class="neg">${brl(v)}</td></tr>`; }).join('') || '<tr><td colspan="2" class="l muted">—</td></tr>'}</tbody></table></div></div></div></div>`;
   $('#rtCrit', box).onchange = e => { gravar(doc(db, 'config', 'rateio'), { criterio: e.target.value }, { merge: true }).catch(onErroEscrita); S.rateio = { ...(S.rateio || {}), criterio: e.target.value }; revRateio(box); };
 }
+
+/* ---------- Dívida conversível: passivo até virar participação ---------- */
+ACOES.converter = d => {
+  const t = S.byId.get(d.id); if (!t) return;
+  const grupo = t.grupo ? S.list.filter(x => x.grupo === t.grupo && x.aporteTipo === 'conversivel' && x.valor > 0 && !x.conversao) : [t];
+  const tot = sum(grupo, x => x.valor);
+  const f = folha('Converter em participação', `<form class="form" id="fx"><p>${esc(t.forn || 'Investidor')} · ${grupo.length > 1 ? grupo.length + ' parcelas, ' : ''}<b>${brl2(tot)}</b></p>
+    <p class="muted small">A partir da data da conversão, o valor sai do passivo (dívida) e passa para o patrimônio líquido como capital no BP. Os lançamentos continuam os mesmos; só muda a classificação.</p>
+    <div class="g2"><label>Data da conversão<input type="date" name="d" value="${hoje()}" required></label><label>Participação recebida<input name="part" placeholder="Ex.: 5% das quotas"></label></div>
+    <label>Observação<input name="obs" placeholder="Ex.: conversão pelo valuation de R$ 10 mi, aditivo ao contrato social"></label>
+    <div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Converter</button></div></form>`);
+  f.el.querySelector('#fx').onsubmit = e => { e.preventDefault(); const F = e.target;
+    salvarTitulos(grupo.map(x => ({ ...x, conversao: F.d.value, ...(F.part.value.trim() ? { participacao: F.part.value.trim() } : {}), obs: [x.obs, F.obs.value.trim()].filter(Boolean).join(' · ') })), { acao: 'converteu em participação' });
+    f.fechar(); toast('Dívida convertida em participação'); };
+};
