@@ -253,11 +253,26 @@ function indicadores(t) {
   return { op, non, rec, roi: base ? (rec + non + op) / base : null, lop: rec + op, mop: rec ? (rec + op) / rec : null, ll: rec + op + non, ml: rec ? (rec + op + non) / rec : null };
 }
 function previstoLote(q) { const o = {}; const p = (S.orcamento && S.orcamento.quadras && S.orcamento.quadras[q]) || {}; for (const k in p) o[k] = (secaoDe(k) === 'rec' ? 1 : -1) * (+p[k] || 0); return o; }
+const normTxt = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const docsCk = () => (S.checklist && S.checklist.docs) || DOCS_PADRAO;
+/* Arquivo mais recente de um documento para o lote: no próprio lote, na quadra ou na obra. */
+function arquivoDoc(q, l, doc) {
+  const A = (S.docsdrive && S.docsdrive.arq) || {};
+  const c = [(A['L|' + q + '|' + l] || {})[doc], (A['Q|' + q] || {})[doc], (A['O|' + obraDe(q)] || {})[doc]].filter(Boolean);
+  return c.sort((a, b) => (b.d || '').localeCompare(a.d || ''))[0] || null;
+}
+function estadoDoc(q, l, i) {
+  const docs = docsCk(), doc = docs[i]; const s = ((S.checklist && S.checklist.lotes) || {})[q + '|' + l] || '';
+  const manual = s[i] === '1'; const arq = arquivoDoc(q, l, doc);
+  const dias = +(((S.checklist && S.checklist.validade) || {})[doc] || 0);
+  const venc = !!(arq && dias && arq.d && addDays(arq.d, dias) < hoje());
+  return { doc, manual, arq, venc, dias, feito: (manual && !venc) || (!!arq && !venc), vale: arq && dias && arq.d ? addDays(arq.d, dias) : '' };
+}
 function ckPct(q, l) {
-  const c = S.checklist; if (!c || !c.docs || !c.docs.length) return null;
+  const docs = docsCk(); if (!docs.length) return null;
   const lots = l === undefined ? lotesDe(q) : [l]; if (!lots.length) return null;
-  let ok = 0; for (const x of lots) { const s = (c.lotes || {})[q + '|' + x] || ''; for (let i = 0; i < c.docs.length; i++) if (s[i] === '1') ok++; }
-  return ok / (lots.length * c.docs.length);
+  let ok = 0; for (const x of lots) for (let i = 0; i < docs.length; i++) if (estadoDoc(q, x, i).feito) ok++;
+  return ok / (lots.length * docs.length);
 }
 function resumoQuadra(q) {
   const ts = S.list.filter(t => t.quadra === q && t.destino !== 'Aporte');
@@ -290,7 +305,7 @@ function iniciarDados() {
     S[key] = snap.exists() ? snap.data() : null; if (key === 'estrutura') S.loaded.estrutura = true; agendarRefresh();
   }, e => console.error(e)));
   cfg('estrutura', 'estrutura'); cfg('orcamento', 'orcamento'); cfg('checklist', 'checklist');
-  cfg('drive', 'drive'); cfg('agenda', 'agenda'); cfg('lixeira', 'lixeira'); cfg('recorrencias', 'recorrencias'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
+  cfg('drive', 'drive'); cfg('docsdrive', 'docsdrive'); cfg('agenda', 'agenda'); cfg('lixeira', 'lixeira'); cfg('recorrencias', 'recorrencias'); cfg('vendas', 'vendas'); cfg('obras', 'obras'); cfg('fornecedores', 'fornecedores'); cfg('simulacoes', 'simulacoes');
   S.unsubs.push(onSnapshot(doc(db, 'config', 'acesso'), s => { S.acesso = s.exists() ? s.data() : null; document.body.classList.toggle('ro', somenteLeitura()); agendarRefresh(); }, e => console.warn(e)));
   S.unsubs.push(onSnapshot(collection(db, 'extratos'), s => { S.extratos = {}; s.forEach(d => S.extratos[d.id] = d.data()); agendarRefresh(); }, e => console.warn(e)));
 }
@@ -935,11 +950,11 @@ async function driveToken(interativo, precisa = DRIVE_SCOPE) {
   if (tokenTem(precisa)) return DRV.token;
   if (!interativo || !driveConfigurado()) return null;
   await carregarGIS();
-  const escopos = [DRIVE_SCOPE, ...(agendaAtiva() || precisa === CAL_SCOPE ? [CAL_SCOPE] : [])].join(' ');
+  const escopos = [DRIVE_SCOPE, ...(agendaAtiva() || precisa === CAL_SCOPE ? [CAL_SCOPE] : []), ...((S.docsdrive && S.docsdrive.ler) || precisa === META_SCOPE ? [META_SCOPE] : [])].join(' ');
   return new Promise((res, rej) => {
     const c = google.accounts.oauth2.initTokenClient({
       client_id: firebaseConfig.driveClientId, scope: escopos, include_granted_scopes: true, hint: S.user?.email || '', prompt: '',
-      callback: r => { if (r.error) { rej(new Error('O Google não autorizou: ' + r.error)); return; } DRV.token = r.access_token; DRV.exp = Date.now() + (+r.expires_in || 3600) * 1000; DRV.scope = r.scope || escopos; try { sessionStorage.setItem('sfgDrive', JSON.stringify({ t: DRV.token, e: DRV.exp, s: DRV.scope })); } catch (e) { /* ok */ } if (!tokenTem(precisa)) { rej(new Error(precisa === CAL_SCOPE ? 'A permissão para a Agenda não foi concedida. Marque a opção da Agenda na tela do Google.' : 'A permissão do Drive não foi concedida.')); return; } setTimeout(() => sincronizarAgenda(false), 500); res(DRV.token); },
+      callback: r => { if (r.error) { rej(new Error('O Google não autorizou: ' + r.error)); return; } DRV.token = r.access_token; DRV.exp = Date.now() + (+r.expires_in || 3600) * 1000; DRV.scope = r.scope || escopos; try { sessionStorage.setItem('sfgDrive', JSON.stringify({ t: DRV.token, e: DRV.exp, s: DRV.scope })); } catch (e) { /* ok */ } if (!tokenTem(precisa)) { rej(new Error(precisa === CAL_SCOPE ? 'A permissão para a Agenda não foi concedida. Marque a opção da Agenda na tela do Google.' : precisa === META_SCOPE ? 'A permissão para ver os arquivos do Drive não foi concedida.' : 'A permissão do Drive não foi concedida.')); return; } setTimeout(() => sincronizarAgenda(false), 500); res(DRV.token); },
       error_callback: e => rej(new Error(e && e.type === 'popup_closed' ? 'Autorização do Drive cancelada.' : 'Não consegui abrir a autorização do Google. Permita pop-ups para este site.'))
     });
     c.requestAccessToken();
@@ -1471,12 +1486,16 @@ VIEWS.checklist = {
     const c = S.checklist || { docs: DOCS_PADRAO, lotes: {} }; const docs = c.docs || DOCS_PADRAO;
     const qs = E().quadras.filter(q => lotesDe(q).length); const q = a[0] && qs.includes(a[0]) ? a[0] : '';
     const lotes = (q ? [q] : qs).flatMap(x => lotesDe(x).map(l => [x, l]));
-    const st = (x, l) => (c.lotes || {})[x + '|' + l] || '';
-    el.innerHTML = `<div class="filtros card"><select id="ckq">${opts(qs, q, 'Todas as quadras')}</select><span class="muted">Toque numa bolinha para marcar ou desmarcar.</span></div>
-    <div class="grid two"><div class="card"><h2>Por documento</h2><div class="tbl-wrap"><table class="tbl"><tbody>${docs.map((d, i) => { const n = lotes.filter(([x, l]) => st(x, l)[i] === '1').length; return `<tr><td class="l">${esc(d)}</td><td>${n}/${lotes.length}</td><td>${pctBar(lotes.length ? n / lotes.length : null)}</td></tr>`; }).join('')}</tbody></table></div></div>
-    <div class="card"><h2>Por quadra</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th>Lotes</th><th>Completos</th><th>Andamento</th></tr></thead><tbody>${qs.map(x => { const ls = lotesDe(x); const full = ls.filter(l => docs.every((_, i) => st(x, l)[i] === '1')).length; return `<tr class="click" data-act="ir" data-href="#/checklist/${encodeURIComponent(x)}"><td class="l"><b>${esc(x)}</b></td><td>${ls.length}</td><td>${full}</td><td>${pctBar(ckPct(x))}</td></tr>`; }).join('')}</tbody></table></div></div></div>
+    const ok = (x, l, i) => estadoDoc(x, l, i).feito;
+    const dd = S.docsdrive || {};
+    el.innerHTML = `<div class="filtros card"><select id="ckq">${opts(qs, q, 'Todas as quadras')}</select><span class="muted">Toque no lote para ver e enviar os documentos; toque numa bolinha para marcar ou desmarcar à mão.</span></div>
+    ${cardDocsDrive(dd)}
+    <div class="grid two"><div class="card"><h2>Por documento</h2><div class="tbl-wrap"><table class="tbl"><tbody>${docs.map((d, i) => { const n = lotes.filter(([x, l]) => ok(x, l, i)).length; const nv = lotes.filter(([x, l]) => estadoDoc(x, l, i).venc).length; return `<tr><td class="l">${esc(d)}${nv ? ` <span class="chip bad">${nv} vencido(s)</span>` : ''}</td><td>${n}/${lotes.length}</td><td>${pctBar(lotes.length ? n / lotes.length : null)}</td></tr>`; }).join('')}</tbody></table></div></div>
+    <div class="card"><h2>Por quadra</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th>Lotes</th><th>Completos</th><th>Andamento</th></tr></thead><tbody>${qs.map(x => { const ls = lotesDe(x); const full = ls.filter(l => docs.every((_, i) => ok(x, l, i))).length; return `<tr class="click" data-act="ir" data-href="#/checklist/${encodeURIComponent(x)}"><td class="l"><b>${esc(x)}</b></td><td>${ls.length}</td><td>${full}</td><td>${pctBar(ckPct(x))}</td></tr>`; }).join('')}</tbody></table></div></div></div>
     <div class="card"><h2>Matriz</h2><div class="tbl-wrap matriz"><table class="tbl cl"><thead><tr><th class="l">Quadra</th><th class="l">Lote</th>${docs.map(d => `<th><span>${esc(d)}</span></th>`).join('')}</tr></thead><tbody>
-    ${lotes.map(([x, l]) => `<tr><td class="l">${esc(x)}</td><td class="l">${esc(l)}</td>${docs.map((d, i) => `<td><button class="dot ${st(x, l)[i] === '1' ? 'y' : ''}" data-act="ck" data-k="${esc(x + '|' + l)}" data-i="${i}" title="${esc(d)}" aria-label="${esc(d)}"></button></td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+    ${lotes.map(([x, l]) => `<tr><td class="l">${esc(x)}</td><td class="l"><button class="btn link sm" data-act="ckLote" data-k="${esc(x + '|' + l)}">${esc(l)}</button></td>${docs.map((d, i) => { const e = estadoDoc(x, l, i); return `<td><button class="dot ${e.feito ? 'y' : ''} ${e.arq ? 'arq' : ''} ${e.venc ? 'venc' : ''}" data-act="${e.arq ? 'ckLote' : 'ck'}" data-k="${esc(x + '|' + l)}" data-i="${i}" title="${esc(d + (e.arq ? ' · arquivo de ' + dBR(e.arq.d) + (e.venc ? ' (vencido)' : '') : e.manual ? ' · marcado à mão' : ''))}" aria-label="${esc(d)}"></button></td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="legenda-ck muted small"><span><i class="dot y"></i> marcado à mão</span><span><i class="dot y arq"></i> arquivo no Drive</span><span><i class="dot venc arq"></i> arquivo vencido</span><span><i class="dot"></i> pendente</span></p></div>`;
+    if (dd.ler && tokenTem(META_SCOPE) && (!dd.ultima || Date.now() - dd.ultima > 10 * 60000) && !DD.lendo) setTimeout(() => lerDocsDrive(false), 300);
     $('#ckq', el).onchange = e => { location.hash = '#/checklist' + (e.target.value ? '/' + encodeURIComponent(e.target.value) : ''); };
   }
 };
@@ -1486,6 +1505,140 @@ ACOES.ck = d => {
   s[i] = s[i] === '1' ? '0' : '1'; c.lotes[d.k] = s.join('');
   gravar(doc(db, 'config', 'checklist'), { docs, lotes: { [d.k]: c.lotes[d.k] } }, { merge: true }).catch(onErroEscrita);
   const b = document.querySelector(`[data-act="ck"][data-k="${CSS.escape(d.k)}"][data-i="${i}"]`); if (b) b.classList.toggle('y', s[i] === '1');
+  if (d.depois) d.depois();
+};
+
+/* ---------- Documentos dos lotes no Google Drive ---------- */
+const META_SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
+const DD = { lendo: false, erro: '', prog: '' };
+const nomeQuadraPasta = q => 'Quadra ' + q, nomeLotePasta = l => 'Lote ' + l;
+const semPrefixo = (s, pre) => normTxt(s).replace(new RegExp('^(' + pre + ')\\s+'), '');
+function docDoNome(nome) {
+  const n = ' ' + normTxt(nome.replace(/\.[a-z0-9]{2,4}$/i, '')) + ' '; let melhor = '';
+  for (const d of docsCk()) { const k = normTxt(d); if (k && n.includes(' ' + k + ' ') && k.length > normTxt(melhor).length) melhor = d; }
+  return melhor;
+}
+function dataDoNome(nome, fallback) {
+  let m = nome.match(/(20\d{2})[-_. ](\d{2})[-_. ](\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = nome.match(/(\d{2})[-_. ](\d{2})[-_. ](20\d{2})/); if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return (fallback || '').slice(0, 10);
+}
+async function listarPasta(id) {
+  const out = []; let tok = '';
+  do {
+    const q = encodeURIComponent(`'${id}' in parents and trashed=false`);
+    const r = await driveReq(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,mimeType,createdTime,modifiedTime)&pageSize=1000${tok ? '&pageToken=' + tok : ''}`);
+    if (!r) break; out.push(...(r.files || [])); tok = r.nextPageToken || '';
+  } while (tok);
+  return out;
+}
+async function raizSFG() {
+  const cfg = JSON.parse(JSON.stringify(S.drive || {}));
+  if (cfg.raiz && await pastaExiste(cfg.raiz.sfg)) return cfg.raiz.sfg;
+  const sfg = await novaPasta('SFG Financeiro'); const an = await novaPasta('Anexos', sfg.id);
+  cfg.raiz = { sfg: sfg.id, anexos: an.id, link: sfg.webViewLink }; cfg.anos = {}; cfg.meses = {}; S.drive = cfg; gravar(doc(db, 'config', 'drive'), cfg).catch(onErroEscrita);
+  return sfg.id;
+}
+function salvarDocsDrive(cfg) { S.docsdrive = cfg; gravar(doc(db, 'config', 'docsdrive'), cfg).catch(onErroEscrita); }
+/* Garante a pasta Documentos / Obra / Quadra / Lote e devolve o id. */
+async function pastaDocs(q, l) {
+  const cfg = clone(S.docsdrive || {}); cfg.p = cfg.p || {}; let mudou = false;
+  if (!cfg.raiz || !(await pastaExiste(cfg.raiz))) { const r = await novaPasta('Documentos', await raizSFG()); cfg.raiz = r.id; cfg.link = r.webViewLink; cfg.p = {}; mudou = true; }
+  const o = obraDe(q); const ko = 'O|' + o, kq = 'Q|' + q, kl = 'L|' + q + '|' + l;
+  if (!cfg.p[ko]) { cfg.p[ko] = (await novaPasta(o, cfg.raiz)).id; mudou = true; }
+  if (!cfg.p[kq]) { cfg.p[kq] = (await novaPasta(nomeQuadraPasta(q), cfg.p[ko])).id; mudou = true; }
+  if (l && !cfg.p[kl]) { cfg.p[kl] = (await novaPasta(nomeLotePasta(l), cfg.p[kq])).id; mudou = true; }
+  if (mudou) salvarDocsDrive(cfg);
+  return l ? cfg.p[kl] : cfg.p[kq];
+}
+async function criarPastasDocs() {
+  if (!(await driveToken(true).catch(e => { toast(e.message, 'err'); return null; }))) return;
+  const lotes = E().quadras.flatMap(q => lotesDe(q).map(l => [q, l])); let i = 0;
+  DD.lendo = true; DD.erro = '';
+  try { for (const [q, l] of lotes) { DD.prog = `Criando pastas ${++i}/${lotes.length}`; if (i % 10 === 1) refreshView(); await pastaDocs(q, l); } toast('Pastas criadas no Drive'); }
+  catch (e) { DD.erro = e.message === 'drive-desconectado' ? 'A autorização do Google expirou. Toque de novo.' : e.message; toast(DD.erro, 'err'); }
+  finally { DD.lendo = false; DD.prog = ''; refreshView(); }
+}
+/* Percorre a pasta Documentos e associa cada arquivo ao documento, lote, quadra ou obra. */
+async function lerDocsDrive(interativo) {
+  if (DD.lendo || !driveConfigurado() || !navigator.onLine) return;
+  const cfg0 = S.docsdrive || {}; if (!cfg0.raiz) { if (interativo) toast('Crie as pastas primeiro.', 'err'); return; }
+  let tk; try { tk = await driveToken(interativo, cfg0.ler ? META_SCOPE : DRIVE_SCOPE); } catch (e) { if (interativo) toast(e.message, 'err'); return; }
+  if (!tk) return;
+  DD.lendo = true; DD.erro = ''; DD.prog = 'Lendo pastas do Drive…'; refreshView();
+  const arq = {}, outros = {}; let nArq = 0;
+  const guarda = (chave, f) => { const d = docDoNome(f.name); if (!d) { (outros[chave] = outros[chave] || []).push(f.name); return; } const x = { i: f.id, n: f.name, d: dataDoNome(f.name, f.modifiedTime || f.createdTime) }; const at = (arq[chave] = arq[chave] || {})[d]; if (!at || (x.d || '') > (at.d || '')) arq[chave][d] = { ...x, c: (at ? at.c || 1 : 0) + 1 }; else at.c = (at.c || 1) + 1; nArq++; };
+  const pasta = 'application/vnd.google-apps.folder';
+  const arquivosEm = async (id, chave, docPasta) => {
+    for (const f of await listarPasta(id)) {
+      if (f.mimeType === pasta) { const d = docDoNome(f.name); if (d && !docPasta) for (const g of await listarPasta(f.id)) { if (g.mimeType !== pasta) guarda(chave, { ...g, name: d + ' ' + g.name }); } continue; }
+      guarda(chave, docPasta ? { ...f, name: docPasta + ' ' + f.name } : f);
+    }
+  };
+  try {
+    const cfg = clone(cfg0); cfg.p = cfg.p || {};
+    for (const fo of await listarPasta(cfg.raiz)) {
+      if (fo.mimeType !== pasta) continue; const o = E().obras.find(x => normTxt(x) === normTxt(fo.name)); if (!o) continue;
+      cfg.p['O|' + o] = fo.id;
+      for (const fq of await listarPasta(fo.id)) {
+        if (fq.mimeType !== pasta) { guarda('O|' + o, fq); continue; }
+        const q = quadrasDaObra(o).find(x => normTxt(x) === semPrefixo(fq.name, 'quadra|qd|q')); if (!q) { if (docDoNome(fq.name)) await arquivosEm(fq.id, 'O|' + o, docDoNome(fq.name)); continue; }
+        cfg.p['Q|' + q] = fq.id; DD.prog = 'Lendo quadra ' + q + '…'; refreshView();
+        for (const fl of await listarPasta(fq.id)) {
+          if (fl.mimeType !== pasta) { guarda('Q|' + q, fl); continue; }
+          const l = lotesDe(q).find(x => normTxt(x) === semPrefixo(fl.name, 'lote|lt|l'));
+          if (!l) { if (docDoNome(fl.name)) await arquivosEm(fl.id, 'Q|' + q, docDoNome(fl.name)); continue; }
+          cfg.p['L|' + q + '|' + l] = fl.id; await arquivosEm(fl.id, 'L|' + q + '|' + l);
+        }
+      }
+    }
+    cfg.arq = arq; cfg.outros = outros; cfg.ultima = Date.now(); cfg.n = nArq; salvarDocsDrive(cfg);
+    if (interativo) toast(`${nArq} arquivo(s) encontrados no Drive`);
+  } catch (e) { DD.erro = e.message === 'drive-desconectado' ? 'A autorização do Google expirou. Toque em Atualizar do Drive.' : e.message; if (interativo) toast(DD.erro, 'err'); }
+  finally { DD.lendo = false; DD.prog = ''; refreshView(); }
+}
+function cardDocsDrive(dd) {
+  if (!driveConfigurado()) return '';
+  return `<div class="card docs-drive"><h2>Documentos no Google Drive ${dd.link ? `<a class="btn sm" href="${esc(dd.link)}" target="_blank" rel="noopener">Abrir pasta</a>` : ''}</h2>
+    <p class="muted small">Pasta <b>SFG Financeiro / Documentos / obra / Quadra / Lote</b>. Coloque o nome do documento no nome do arquivo (ex.: "ART lote 19.pdf", "Certidão de ônus 2026-10-15.pdf"). O app marca o checklist sozinho e usa sempre o arquivo mais recente. Um arquivo na pasta da quadra ou da obra vale para todos os lotes dela.</p>
+    ${dd.raiz ? `<div class="kv"><span>Última leitura</span><b>${dd.ultima ? quando(dd.ultima) + ' · ' + (dd.n || 0) + ' arquivo(s)' : 'ainda não'}</b></div>` : ''}
+    ${DD.prog ? `<p class="muted small">${esc(DD.prog)}</p>` : ''}${DD.erro ? `<p class="erro small">${esc(DD.erro)}</p>` : ''}
+    <div class="acts left rw">${dd.raiz ? `<button class="btn primary" data-act="ddLer" ${DD.lendo ? 'disabled' : ''}>Atualizar do Drive</button><button class="btn" data-act="ddCriar" ${DD.lendo ? 'disabled' : ''}>Criar pastas que faltam</button>` : `<button class="btn primary" data-act="ddCriar" ${DD.lendo ? 'disabled' : ''}>Criar as pastas no Drive</button>`}
+      ${dd.raiz ? (dd.ler ? `<button class="btn ghost" data-act="ddLerOff">Só ver arquivos enviados pelo app</button>` : `<button class="btn" data-act="ddLerOn">Ver também arquivos que eu colocar direto no Drive</button>`) : ''}</div>
+    ${dd.raiz && !dd.ler ? '<p class="muted small">Hoje o app só enxerga os arquivos que ele mesmo enviou. Para ler o que você arrastar direto para as pastas, ligue a opção acima: o Google vai pedir permissão para o app ver os nomes dos arquivos do seu Drive (só nomes e datas, sem abrir o conteúdo).</p>' : ''}</div>`;
+}
+ACOES.ddCriar = () => criarPastasDocs();
+ACOES.ddLer = () => lerDocsDrive(true);
+ACOES.ddLerOn = async () => { const c = { ...(S.docsdrive || {}), ler: true }; salvarDocsDrive(c); try { await driveToken(true, META_SCOPE); lerDocsDrive(true); } catch (e) { toast(e.message, 'err'); } };
+ACOES.ddLerOff = () => { salvarDocsDrive({ ...(S.docsdrive || {}), ler: false }); refreshView(); };
+ACOES.docVal = d => {
+  const nd = docsCk()[+d.i]; const v = ((S.checklist && S.checklist.validade) || {})[nd] || '';
+  const f = folha('Documento: ' + nd, `<form class="form" id="fx"><label>Validade em dias <span class="muted">(vazio = não vence)</span><input name="v" type="number" min="0" inputmode="numeric" value="${esc(v)}" placeholder="Ex.: 30"></label><p class="muted small">A validade conta a partir da data no nome do arquivo (2026-10-15 ou 15-10-2026) ou, sem data no nome, do dia em que ele foi colocado no Drive.</p><div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
+  f.el.querySelector('#fx').onsubmit = e => { e.preventDefault(); const n = +e.target.v.value || 0; const c = S.checklist = S.checklist || { docs: DOCS_PADRAO, lotes: {} }; c.validade = { ...(c.validade || {}) }; if (n) c.validade[nd] = n; else delete c.validade[nd]; gravar(doc(db, 'config', 'checklist'), { docs: docsCk(), validade: c.validade }, { merge: true }).catch(onErroEscrita); f.fechar(); refreshView(); };
+};
+/* Documentos de um lote: situação de cada um, abrir, enviar arquivo, marcar à mão. */
+ACOES.ckLote = d => {
+  const [q, l] = d.k.split('|'); const docs = docsCk(); const dd = S.docsdrive || {};
+  const pl = dd.p && dd.p['L|' + q + '|' + l]; const outros = ((dd.outros || {})['L|' + q + '|' + l] || []);
+  const linha = (doc, i) => { const e = estadoDoc(q, l, i); return `<div class="ckdoc ${e.feito ? 'ok' : ''} ${e.venc ? 'venc' : ''}"><span class="dot ${e.feito ? 'y' : ''} ${e.arq ? 'arq' : ''} ${e.venc ? 'venc' : ''}"></span><div class="ckdoc-txt"><b>${esc(doc)}</b><small>${e.arq ? `${esc(e.arq.n)} · ${dBR(e.arq.d)}${e.dias ? (e.venc ? ` · <span class="neg">vencido em ${dBR(e.vale)}</span>` : ` · vale até ${dBR(e.vale)}`) : ''}${e.arq.c > 1 ? ` · ${e.arq.c} versões` : ''}` : e.manual ? 'marcado à mão, sem arquivo' : 'pendente'}</small></div>
+    <span class="ckdoc-acts">${e.arq ? `<a class="btn sm" href="https://drive.google.com/file/d/${esc(e.arq.i)}/view" target="_blank" rel="noopener">Abrir</a>` : ''}<label class="btn sm file rw">Enviar<input type="file" data-up="${i}" accept="image/*,application/pdf" hidden></label><button type="button" class="btn sm ghost rw" data-man="${i}">${e.manual ? 'Desmarcar' : 'Marcar'}</button></span></div>`; };
+  const f = folha(`Documentos · Quadra ${q}, lote ${l}`, `<div class="ckdocs">${docs.map(linha).join('')}</div>
+    ${outros.length ? `<p class="muted small">Arquivos na pasta do lote sem documento reconhecido: ${esc(outros.join(', '))}. Coloque o nome do documento no nome do arquivo.</p>` : ''}
+    <div class="acts left">${pl ? `<a class="btn" href="https://drive.google.com/drive/folders/${esc(pl)}" target="_blank" rel="noopener">Abrir pasta do lote no Drive</a>` : ''}</div>`, { largo: true });
+  $$('[data-man]', f.el).forEach(b => b.onclick = () => { ACOES.ck({ k: d.k, i: b.dataset.man }); f.fechar(); ACOES.ckLote(d); });
+  $$('[data-up]', f.el).forEach(inp => inp.onchange = async () => {
+    const file = inp.files[0]; if (!file) return; const doc = docs[+inp.dataset.up];
+    if (!navigator.onLine) { toast('Enviar documentos precisa de internet.', 'err'); return; }
+    try {
+      if (!(await driveToken(true))) return; toast('Enviando ' + doc + '…');
+      const pasta = await pastaDocs(q, l); const ext = (file.name.match(/\.[a-z0-9]{2,4}$/i) || [file.type === 'application/pdf' ? '.pdf' : '.jpg'])[0];
+      const nome = `${doc} - Quadra ${q} lote ${l} - ${hoje()}${ext}`.replace(/[\/\\:*?"<>|#%]+/g, '-');
+      const r = await enviarArquivoDrive(file, nome, pasta);
+      const cfg = clone(S.docsdrive || {}); cfg.arq = cfg.arq || {}; const k = 'L|' + q + '|' + l; cfg.arq[k] = cfg.arq[k] || {}; const at = cfg.arq[k][doc];
+      cfg.arq[k][doc] = { i: r.id, n: nome, d: hoje(), c: (at ? at.c || 1 : 0) + 1 }; cfg.n = (cfg.n || 0) + 1; salvarDocsDrive(cfg);
+      toast(doc + ' enviado'); f.fechar(); ACOES.ckLote(d);
+    } catch (e) { toast(e.message === 'drive-desconectado' ? 'A autorização do Google expirou. Tente de novo.' : e.message, 'err'); }
+  });
 };
 
 /* ---------- Cadastros ---------- */
@@ -1519,7 +1672,7 @@ VIEWS.cadastros = {
       <p class="muted small">Vencimentos que caem nestes dias (ou em fins de semana) vão para o próximo dia útil. Os feriados nacionais, inclusive Carnaval, Sexta-feira Santa e Corpus Christi, já são calculados todo ano. Inclua os feriados de Juazeiro e da Bahia que afetam os seus pagamentos.</p>
       <div class="chips">${((e.feriados) || []).map((f, i) => `<span class="chip">${esc(f.d.length === 5 ? f.d.slice(3) + '/' + f.d.slice(0, 2) + ' (todo ano)' : dBR(f.d))} ${esc(f.nome || '')} <button class="x rw" data-act="rmFeriado" data-i="${i}" aria-label="Remover">×</button></span>`).join('') || '<span class="muted small">Nenhum feriado local cadastrado.</span>'}</div>
       <details style="margin-top:10px"><summary class="muted small">Ver feriados nacionais de ${new Date().getFullYear()}</summary><div class="chips" style="margin-top:8px">${[...feriadosNacionais(new Date().getFullYear()).entries()].sort().map(([d, n]) => `<span class="chip">${dBR(d).slice(0, 5)} ${esc(n)}</span>`).join('')}</div></details></div>
-    <div class="card"><h2>Documentos do checklist <button class="btn sm" data-act="cadDoc">Adicionar</button></h2><div class="chips">${((S.checklist && S.checklist.docs) || DOCS_PADRAO).map(d => `<span class="chip">${esc(d)}</span>`).join('')}</div></div>`;
+    <div class="card"><h2>Documentos do checklist <button class="btn sm" data-act="cadDoc">Adicionar</button></h2><p class="muted small">Toque num documento para definir a validade em dias (ex.: certidão de ônus, 30 dias). O app avisa quando o arquivo mais recente passar da validade.</p><div class="chips">${docsCk().map((d, i) => { const v = ((S.checklist && S.checklist.validade) || {})[d]; return `<button class="chip" data-act="docVal" data-i="${i}">${esc(d)}${v ? ` · ${v} dias` : ''}</button>`; }).join('')}</div></div>`;
   }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
