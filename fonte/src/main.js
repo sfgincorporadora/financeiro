@@ -46,6 +46,19 @@ function parseBR(s) {
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function toast(msg, tipo) { const t = $('#toast'); t.textContent = msg; t.className = 'on ' + (tipo || ''); clearTimeout(toast._t); toast._t = setTimeout(() => t.className = '', 3500); }
 
+/* ---------- Tema claro / escuro ---------- */
+const TEMAS = [['auto', 'Automático'], ['claro', 'Claro'], ['escuro', 'Escuro']];
+const temaPref = () => { try { const m = localStorage.getItem('sfgTema'); return m === 'claro' || m === 'escuro' ? m : 'auto'; } catch (e) { return 'auto'; } };
+const escuroAgora = () => { const m = temaPref(); return m === 'escuro' || (m === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches); };
+function aplicarTema(m) {
+  try { if (m === 'auto') localStorage.removeItem('sfgTema'); else localStorage.setItem('sfgTema', m); } catch (e) { /* ok */ }
+  if (m === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = m === 'claro' ? 'light' : 'dark';
+  const b = document.getElementById('btnTema'); if (b) { b.innerHTML = ic(m === 'claro' ? 'sol' : m === 'escuro' ? 'lua' : 'auto'); b.title = b.ariaLabel = 'Tema: ' + TEMAS.find(x => x[0] === m)[1] + ' (toque para trocar)'; }
+  const lg = document.querySelector('.login-logo'); if (lg) lg.src = escuroAgora() ? 'icons/logo-branco-incorporadora.svg' : LOGO_COMPLETO;
+  if (typeof refreshView === 'function' && document.getElementById('view')) refreshView();
+}
+const seletorTema = () => `<div class="seg" role="group" aria-label="Tema">${TEMAS.map(([v, l]) => `<button class="${temaPref() === v ? 'on' : ''}" data-act="tema" data-v="${v}">${ic(v === 'claro' ? 'sol' : v === 'escuro' ? 'lua' : 'auto', 16)} ${l}</button>`).join('')}</div>`;
+
 /* ---------- Dias úteis e feriados ---------- */
 function pascoa(y) { const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1; return isoLocal(new Date(y, mes - 1, dia)); }
 const _feriados = {};
@@ -109,9 +122,25 @@ const E = () => {
     contas: e.contas && e.contas.length ? e.contas : [{ nome: 'BTG', inicial: 0 }, { nome: 'Caixa', inicial: 0 }],
     feriados: e.feriados || [],
     obras: e.obras && e.obras.length ? e.obras : [e.local || 'Nova Juazeiro'],
-    quadraObra: e.quadraObra || {}
+    quadraObra: e.quadraObra || {},
+    empresas: e.empresas && e.empresas.length ? e.empresas : [{ id: 'matriz', nome: 'SFG Incorporadora', cnpj: '', tipo: 'matriz' }],
+    obraEmpresa: e.obraEmpresa || {}
   };
 };
+const empPorId = id => E().empresas.find(x => x.id === id);
+const matrizId = () => (E().empresas.find(x => x.tipo === 'matriz') || E().empresas[0]).id;
+const empDaObra = o => { const id = E().obraEmpresa[o]; return id && empPorId(id) ? id : matrizId(); };
+const empT = t => t.emp && empPorId(t.emp) ? t.emp : empDaObra(obraT(t));
+const empConta = nome => { const c = E().contas.find(x => x.nome === nome); return c && c.emp && empPorId(c.emp) ? c.emp : matrizId(); };
+const variasEmpresas = () => E().empresas.length > 1;
+const fCnpj = c => { const d = String(c || '').replace(/\D/g, ''); return d.length === 14 ? `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}` : (c || ''); };
+function cnpjValido(c) {
+  const d = String(c || '').replace(/\D/g, ''); if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
+  const dv = n => { let s = 0, p = n - 7; for (let i = 0; i < n; i++) { s += +d[i] * p--; if (p < 2) p = 9; } const r = s % 11; return r < 2 ? 0 : 11 - r; };
+  return dv(12) === +d[12] && dv(13) === +d[13];
+}
+const empRotulo = (x, curto) => x ? x.nome + (x.cnpj && !curto ? ' · ' + fCnpj(x.cnpj) : '') + (x.tipo === 'matriz' && curto ? ' (matriz)' : '') : '';
+const empOpts = () => E().empresas.map(x => [x.id, (x.tipo === 'matriz' ? 'Matriz · ' : 'Filial · ') + x.nome + (x.cnpj ? ' · ' + fCnpj(x.cnpj).slice(-8) : '')]);
 const obraDe = q => { const e = E(); const o = e.quadraObra[q]; return o && e.obras.includes(o) ? o : e.obras[0]; };
 const obraT = t => t.quadra && t.quadra !== '-' && E().quadras.includes(t.quadra) ? obraDe(t.quadra) : (t.local || E().obras[0]);
 const variasObras = () => E().obras.length > 1;
@@ -277,6 +306,10 @@ const IC = {
   cronograma: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   vendas: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   simulador: '<path d="M5 3h14v18H5zM8 7h8M8 11h2M12 11h2M8 15h2M12 15h2M8 18h2M12 18h2M16 11v7"/>',
+  empresas: '<path d="M3 21h18M5 21V5l7-3v19M12 9h7v12M8 8h1M8 12h1M8 16h1M15 13h1M15 17h1"/>',
+  sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  lua: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  auto: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18A9 9 0 0 0 12 3z" fill="currentColor"/>',
   fornecedores: '<path d="M3 7h13v10H3zM16 10h3l2 3v4h-5M7 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/>',
   usuarios: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>',
   calendario: '<path d="M4 5h16v16H4zM4 9h16M8 3v4M16 3v4"/>',
@@ -289,7 +322,7 @@ const ic = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" f
 const NAV = [
   ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['conciliacao', 'Conciliação'], ['relatorios', 'Relatórios'],
   ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['cronograma', 'Cronograma'], ['vendas', 'Vendas e repasses'], ['checklist', 'Checklist'], ['simulador', 'Simulador'],
-  ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['dados', 'Dados e backup']
+  ['#', 'Gestão'], ['empresas', 'Empresas (CNPJ)'], ['fornecedores', 'Fornecedores'], ['cadastros', 'Cadastros'], ['usuarios', 'Usuários'], ['dados', 'Dados e backup']
 ];
 const LOGO_BRANCO = 'icons/logo-branco.svg', LOGO_AZUL = 'icons/logo-azul.svg', LOGO_COMPLETO = 'icons/logo-azul-incorporadora.svg';
 const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Receber'], ['obras', 'Obras'], ['mais', 'Mais']];
@@ -298,11 +331,11 @@ const NAV_MOBILE = [['inicio', 'Início'], ['pagar', 'Pagar'], ['receber', 'Rece
    Telas de entrada
    ========================================================= */
 function telaNaoConfigurado() {
-  document.body.innerHTML = `<div class="center"><div class="login card"><picture><source srcset="icons/logo-branco-incorporadora.svg" media="(prefers-color-scheme: dark)"><img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"></picture><h1>Sistema ainda não configurado</h1><p class="muted">Falta colar a configuração do Firebase em <code>src/config.js</code> e gerar o app novamente.</p></div></div>`;
+  document.body.innerHTML = `<div class="center"><div class="login card"><img src="${escuroAgora() ? 'icons/logo-branco-incorporadora.svg' : LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"><h1>Sistema ainda não configurado</h1><p class="muted">Falta colar a configuração do Firebase em <code>src/config.js</code> e gerar o app novamente.</p></div></div>`;
 }
 function telaLogin(msg) {
   document.body.innerHTML = `<div class="center"><form class="login card" id="fLogin" autocomplete="on">
-    <picture><source srcset="icons/logo-branco-incorporadora.svg" media="(prefers-color-scheme: dark)"><img src="${LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"></picture><h1>Financeiro</h1><p class="muted">Acesso restrito</p>
+    <img src="${escuroAgora() ? 'icons/logo-branco-incorporadora.svg' : LOGO_COMPLETO}" alt="SFG Incorporadora" class="login-logo"><h1>Financeiro</h1><p class="muted">Acesso restrito</p>
     <label>E-mail<input name="email" type="email" autocomplete="username" required></label>
     <label>Senha<input name="senha" type="password" autocomplete="current-password" required></label>
     <p class="erro" id="loginErr">${esc(msg || '')}</p>
@@ -332,7 +365,7 @@ function montarShell() {
       <nav>${NAV.map(([k, n]) => k === '#' ? `<div class="sec">${n}</div>` : `<a href="#/${k}" data-nav="${k}">${ic(k, 18)}<span>${n}</span></a>`).join('')}</nav>
       <div class="side-foot"><span id="sideUser" class="muted"></span></div></aside>
     <div class="main">
-      <header class="top"><button class="icon-btn back hidden" id="btnBack" aria-label="Voltar">${ic('voltar')}</button><img class="tlogo" src="${LOGO_BRANCO}" alt="SFG"><h1 id="title"></h1><span id="sync" class="sync"></span><button class="btn primary desk rw" data-act="novo">${ic('plus', 18)} Novo lançamento</button></header>
+      <header class="top"><button class="icon-btn back hidden" id="btnBack" aria-label="Voltar">${ic('voltar')}</button><img class="tlogo" src="${LOGO_BRANCO}" alt="SFG"><h1 id="title"></h1><span id="sync" class="sync"></span><button class="icon-btn tema-btn" id="btnTema" data-act="temaCiclo" aria-label="Tema">${ic(temaPref() === 'claro' ? 'sol' : temaPref() === 'escuro' ? 'lua' : 'auto')}</button><button class="btn primary desk rw" data-act="novo">${ic('plus', 18)} Novo lançamento</button></header>
       <div id="view" class="view"></div>
     </div>
     <nav class="bottom">${NAV_MOBILE.map(([k, n]) => `<a href="#/${k}" data-nav="${k}">${ic(k, 22)}<span>${n}</span></a>`).join('')}</nav>
@@ -412,7 +445,15 @@ function confirmar(msg, ok = 'Confirmar', perigo = true) {
 const opts = (arr, sel, vazio) => (vazio !== undefined ? `<option value="">${esc(vazio)}</option>` : '') + arr.map(x => { const [v, l] = Array.isArray(x) ? x : [x, x]; return `<option value="${esc(v)}" ${String(v) === String(sel) ? 'selected' : ''}>${esc(l)}</option>`; }).join('');
 const optsDestino = sel => ['op', 'nonop', 'rec', 'aporte'].map(s => { const ds = E().destinos[s] || []; return ds.length ? `<optgroup label="${SECAO_NOME[s]}">${opts(ds, sel)}</optgroup>` : ''; }).join('');
 const quadrasOpts = () => [['-', 'Geral / administrativo (-)'], ...E().quadras.map(q => [q, 'Quadra ' + q + (variasObras() ? ' · ' + obraDe(q) : '')])];
-const campoObra = sel => variasObras() ? `<label>Obra<select name="obra">${opts(E().obras, sel || E().obras[0])}</select></label>` : '';
+const campoObra = (sel, empSel) => {
+  const o = sel || E().obras[0]; const c = [];
+  if (variasObras()) c.push(`<label>Obra<select name="obra">${opts(E().obras, o)}</select></label>`);
+  if (variasEmpresas()) c.push(`<label>Empresa (CNPJ)<select name="emp">${opts(empOpts(), empSel || empDaObra(o))}</select></label>`);
+  return c.length === 2 ? `<div class="g2">${c.join('')}</div>` : c.join('');
+};
+const obraDoForm = F => F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : E().obras[0]);
+const sincEmp = F => { if (F.emp) F.emp.value = empDaObra(obraDoForm(F)); };
+const empDoForm = (F, obj) => { if (!F.emp) return; if (F.emp.value !== empDaObra(obj.local)) obj.emp = F.emp.value; else delete obj.emp; };
 
 /* ---------- Novo lançamento ---------- */
 function formNovo(def = {}) {
@@ -494,9 +535,10 @@ function formNovo(def = {}) {
         let item = base + (n > 1 ? ` (${i + 1}/${n})` : '') + (l !== '-' ? ` - ${q} ${l}` : (q !== '-' ? ` - ${q}` : ''));
         const valor = (tipo === 'saida' ? -1 : 1) * valores[k++];
         if (!valor) continue;
-        const t = { id: uid(), item, valor, juros: 0, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: q !== '-' ? obraDe(q) : (F.obra ? F.obra.value : E().obras[0]), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
+        const t = { id: uid(), item, valor, juros: 0, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), local: obraDoForm(F), quadra: q, lote: l, destino: F.destino.value, venc, status: 'aberto', forn: F.forn.value.trim(), obs: F.obs.value.trim(), grupo, criado: Date.now() };
         if (F.realizado.checked) { t.status = 'pago'; t.pag = n > 1 ? venc : (F.pag.value || venc); t.conta = F.conta.value; }
         if (venc !== parc[i].d) t.vencOrig = parc[i].d;
+        empDoForm(F, t);
         const qt = parseBR(F.qtd.value); if (qt > 0) { t.qtd = Math.round((F.modo.value === 'cada' ? qt : qt / total) * 1000) / 1000; t.unid = F.unid.value.trim(); }
         if (def.conc && total === 1) t.conc = def.conc;
         out.push(t);
@@ -512,8 +554,8 @@ function formNovo(def = {}) {
     if (!g.lista.length) { p.innerHTML = '<span class="muted">Informe valores maiores que zero.</span>'; return; }
     p.innerHTML = `<b>${g.total} lançamento${g.total > 1 ? 's' : ''}</b>, total <b class="${cls(tot)}">${brl2(tot)}</b>${g.ajustes ? `, ${g.ajustes} vencimento(s) passado(s) para dia útil` : ''}<br><span class="muted">Primeiro: ${esc(g.lista[0].item)}, ${brl2(g.lista[0].valor)}, vence ${dCurtoSem(g.lista[0].venc)}${g.total > 1 ? `. Último vence ${dCurtoSem(g.lista[g.lista.length - 1].venc)}` : ''}</span>`;
   };
-  F.quadra.onchange = () => { if (F.obra && F.quadra.value !== '-') F.obra.value = obraDe(F.quadra.value); lotesBox(); recalcParc(); prev(); };
-  if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; lotesBox(); recalcParc(); prev(); } };
+  F.quadra.onchange = () => { if (F.obra && F.quadra.value !== '-') F.obra.value = obraDe(F.quadra.value); sincEmp(F); lotesBox(); recalcParc(); prev(); };
+  if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; lotesBox(); recalcParc(); prev(); } sincEmp(F); };
   F.realizado.onchange = () => { real(); prev(); };
   F.addEventListener('input', prev); F.addEventListener('change', prev);
   lotesBox(); real(); recalcParc(); prev();
@@ -535,7 +577,7 @@ function formEditar(t) {
     <div class="g2"><label>Fornecedor / cliente<input name="forn" value="${esc(t.forn || '')}"></label><label>Destino<select name="destino">${optsDestino(t.destino)}${todosDestinos().includes(t.destino) ? '' : `<option selected>${esc(t.destino)}</option>`}</select></label></div>
     <div class="g2"><label>Valor (R$)<input name="valor" inputmode="decimal" required value="${fNum2.format(Math.abs(t.valor))}"></label><label>Vencimento<input type="date" name="venc" required value="${esc(t.venc)}"></label></div>
     <label class="chk"><input type="checkbox" name="util" ${prefUtil() ? 'checked' : ''}> Se cair em fim de semana ou feriado, passar para o próximo dia útil</label><p class="hint-data" id="edHint"></p>
-    ${campoObra(obraT(t))}
+    ${campoObra(obraT(t), empT(t))}
     <div class="g2"><label>Quadra<select name="quadra">${opts(quadrasOpts(), t.quadra || '-')}${(t.quadra && t.quadra !== '-' && !E().quadras.includes(t.quadra)) ? `<option selected>${esc(t.quadra)}</option>` : ''}</select></label>
       <label>Lote<select name="lote">${opts([['-', 'Sem lote (-)'], ...lots], t.lote || '-')}${(t.lote && t.lote !== '-' && !lots.includes(t.lote)) ? `<option selected>${esc(t.lote)}</option>` : ''}</select></label></div>
     ${pago(t) ? `<div class="g3"><label>Pago em<input type="date" name="pag" value="${esc(t.pag || t.venc)}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), t.conta)}</select></label><label>Juros/multa (R$)<input name="juros" inputmode="decimal" value="${t.juros ? fNum2.format(Math.abs(t.juros)) : ''}"></label></div>` : ''}
@@ -547,12 +589,13 @@ function formEditar(t) {
   $$('#segTipo button', F).forEach(b => b.onclick = () => { tipo = b.dataset.v; $$('#segTipo button', F).forEach(x => x.classList.toggle('on', x === b)); });
   const edHint = () => { const m = motivoNaoUtil(F.venc.value); $('#edHint', F).textContent = m ? (F.util.checked ? `Cai em ${m}: será salvo para ${dCurtoSem(proximoDiaUtil(F.venc.value))}.` : `Cai em ${m}.`) : ''; };
   F.venc.oninput = edHint; F.util.onchange = () => { setPrefUtil(F.util.checked); edHint(); }; edHint();
-  F.quadra.onchange = () => { const q = F.quadra.value; if (F.obra && q !== '-') F.obra.value = obraDe(q); F.lote.innerHTML = opts([['-', 'Sem lote (-)'], ...(q === '-' ? [] : lotesDe(q))], '-'); };
-  if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; F.quadra.onchange(); } };
+  F.quadra.onchange = () => { const q = F.quadra.value; if (F.obra && q !== '-') F.obra.value = obraDe(q); sincEmp(F); F.lote.innerHTML = opts([['-', 'Sem lote (-)'], ...(q === '-' ? [] : lotesDe(q))], '-'); };
+  if (F.obra) F.obra.onchange = () => { if (F.quadra.value !== '-' && obraDe(F.quadra.value) !== F.obra.value) { F.quadra.value = '-'; F.quadra.onchange(); } sincEmp(F); };
   F.onsubmit = e => {
     e.preventDefault(); const v = parseBR(F.valor.value); if (!(v >= 0)) { toast('Valor inválido', 'err'); return; }
     const sg = tipo === 'saida' ? -1 : 1;
     const n = { ...t, item: F.item.value.trim(), forn: F.forn.value.trim(), destino: F.destino.value, valor: sg * v, venc: F.util.checked ? proximoDiaUtil(F.venc.value) : F.venc.value, quadra: F.quadra.value, local: F.quadra.value !== '-' && E().quadras.includes(F.quadra.value) ? obraDe(F.quadra.value) : (F.obra ? F.obra.value : (t.local || E().obras[0])), lote: F.lote.value, nf: F.nf.checked || F.nfNum.value.trim() ? 1 : 0, nfNum: F.nfNum.value.trim(), obs: F.obs.value.trim() };
+    empDoForm(F, n);
     { const qt = parseBR(F.qtd.value); if (qt > 0) { n.qtd = qt; n.unid = F.unid.value.trim(); } else { delete n.qtd; delete n.unid; } }
     if (pago(t)) { n.pag = F.pag.value; n.conta = F.conta.value; const j = parseBR(F.juros.value); n.juros = j > 0 ? sg * j : 0; }
     salvarTitulos([n]); f.fechar(); toast('Alteração salva');
@@ -896,7 +939,7 @@ VIEWS.inicio = {
 };
 
 function viewLista(modo) {
-  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', obra: '', quadra: '', dest: '', conta: '', ini: '', fim: '' };
+  const F = { q: '', per: modo === 'extrato' ? 'mes' : 'todos', st: 'aberto', emp: '', obra: '', quadra: '', dest: '', conta: '', ini: '', fim: '' };
   let selMode = false, limite = 200, agrup = true;
   const per = modo === 'extrato'
     ? [['mes', 'Este mês'], ['mesant', 'Mês passado'], ['30d', 'Últimos 30 dias'], ['ano', 'Este ano'], ['todos', 'Tudo'], ['custom', 'Período…']]
@@ -905,11 +948,13 @@ function viewLista(modo) {
     titulo: modo === 'pagar' ? 'Contas a pagar' : modo === 'receber' ? 'Contas a receber' : 'Extrato',
     montar(el) {
       listaSel.clear(); selMode = false; limite = 200;
+      if (filtroPendente) { Object.assign(F, filtroPendente); filtroPendente = null; }
       el.innerHTML = `<div class="filtros card">
         <input type="search" id="fq" placeholder="Buscar descrição, fornecedor…" value="${esc(F.q)}">
         ${modo !== 'extrato' ? `<select id="fst">${opts([['aberto', 'Em aberto'], ['pago', modo === 'pagar' ? 'Pagas' : 'Recebidas'], ['todos', 'Todas']], F.st)}</select>` : `<select id="fconta">${opts(E().contas.map(c => c.nome), F.conta, 'Todas as contas')}</select>`}
         <select id="fper">${opts(per, F.per)}</select>
         <span id="fcustom" class="${F.per === 'custom' ? '' : 'hidden'}"><input type="date" id="fini" value="${F.ini}"> até <input type="date" id="ffim" value="${F.fim}"></span>
+        ${variasEmpresas() ? `<select id="femp">${opts(empOpts(), F.emp, 'Todas as empresas')}</select>` : ''}
         ${variasObras() ? `<select id="fobra">${opts(E().obras, F.obra, 'Todas as obras')}</select>` : ''}
         <select id="fquadra">${opts(quadrasOpts().map(([v, l]) => [v, l.replace('Quadra ', '')]), F.quadra, 'Todas as quadras')}</select>
         <select id="fdest">${opts(todosDestinos(), F.dest, 'Todos os destinos')}</select>
@@ -917,7 +962,7 @@ function viewLista(modo) {
         ${modo !== 'extrato' ? `<button class="btn" id="bSel">Selecionar</button>` : ''}
       </div><div id="lsaldo"></div><div class="card"><div id="ltot" class="ltot"></div><div id="lrows" class="tlist"></div><div id="lmore"></div></div><div id="selbar" class="selbar hidden"></div>`;
       const bind = (id, k, ev = 'change') => $('#' + id, el)?.addEventListener(ev, e => { F[k] = e.target.value; limite = 200; if (k === 'per') $('#fcustom', el).classList.toggle('hidden', F.per !== 'custom'); this.refresh(el); });
-      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('fobra', 'obra'); bind('fquadra', 'quadra'); bind('fdest', 'dest');
+      bind('fq', 'q', 'input'); bind('fst', 'st'); bind('fconta', 'conta'); bind('fper', 'per'); bind('fini', 'ini'); bind('ffim', 'fim'); bind('femp', 'emp'); bind('fobra', 'obra'); bind('fquadra', 'quadra'); bind('fdest', 'dest');
       $('#fgrp', el).onchange = e => { agrup = e.target.checked; limite = 200; this.refresh(el); };
       const bs = $('#bSel', el); if (bs) bs.onclick = () => { selMode = !selMode; listaSel.clear(); bs.classList.toggle('on', selMode); bs.textContent = selMode ? 'Cancelar seleção' : 'Selecionar'; this.refresh(el); };
     },
@@ -939,7 +984,7 @@ function viewLista(modo) {
         if (modo === 'receber' && !(t.valor > 0)) return false;
         if (st === 'aberto' && pago(t)) return false; if (st === 'pago' && !pago(t)) return false;
         if (F.per === 'vencidas' && pago(t)) return false;
-        if (F.obra && obraT(t) !== F.obra) return false; if (F.quadra && t.quadra !== F.quadra) return false; if (F.dest && t.destino !== F.dest) return false;
+        if (F.emp && empT(t) !== F.emp) return false; if (F.obra && obraT(t) !== F.obra) return false; if (F.quadra && t.quadra !== F.quadra) return false; if (F.dest && t.destino !== F.dest) return false;
         if (F.conta && t.conta !== F.conta) return false;
         if (q && !(t.item.toLowerCase().includes(q) || (t.forn || '').toLowerCase().includes(q) || (t.obs || '').toLowerCase().includes(q) || (t.nfNum || '').includes(q))) return false;
         return okPer(campo === 'pag' ? (t.pag || t.venc) : t.venc);
@@ -948,7 +993,7 @@ function viewLista(modo) {
       rows.sort((a, b) => { const x = (campo === 'pag' ? (a.pag || a.venc) : a.venc) || '', y = (campo === 'pag' ? (b.pag || b.venc) : b.venc) || ''; return desc ? y.localeCompare(x) || (b.criado || 0) - (a.criado || 0) : x.localeCompare(y) || (a.criado || 0) - (b.criado || 0); });
       // saldo corrido no extrato
       let saldoMap = null;
-      if (modo === 'extrato' && !q && !F.obra && !F.quadra && !F.dest) {
+      if (modo === 'extrato' && !q && !F.emp && !F.obra && !F.quadra && !F.dest) {
         const sd = saldos(); let s = F.conta ? (E().contas.find(c => c.nome === F.conta)?.inicial || 0) : sum(E().contas, c => +c.inicial || 0);
         const all = S.list.filter(t => pago(t) && (!F.conta || t.conta === F.conta)).sort((a, b) => (a.pag || a.venc || '').localeCompare(b.pag || b.venc || '') || (a.criado || 0) - (b.criado || 0));
         saldoMap = new Map(); for (const t of all) { s += t.valor + (t.juros || 0); saldoMap.set(t.id, s); }
@@ -1135,11 +1180,15 @@ VIEWS.cadastros = {
   refresh(el) {
     const e = E();
     el.innerHTML = `<div class="grid two">
-      <div class="card"><h2>Obras <button class="btn sm rw" data-act="cadObra">Nova obra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Obra</th><th>Quadras</th><th>Lançamentos</th><th></th></tr></thead><tbody>
-        ${e.obras.map(o => `<tr><td class="l"><b>${esc(o)}</b></td><td>${quadrasDaObra(o).length}</td><td>${S.list.filter(x => obraT(x) === o).length}</td><td><button class="btn sm rw" data-act="cadObra" data-o="${esc(o)}">Editar</button></td></tr>`).join('')}</tbody></table></div></div>
+      <div class="card"><h2>Obras <button class="btn sm rw" data-act="cadObra">Nova obra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Obra</th>${variasEmpresas() ? '<th class="l">Empresa</th>' : ''}<th>Quadras</th><th>Lanç.</th><th></th></tr></thead><tbody>
+        ${e.obras.map(o => `<tr><td class="l"><b>${esc(o)}</b></td>${variasEmpresas() ? `<td class="l">${esc(empRotulo(empPorId(empDaObra(o)), true))}</td>` : ''}<td>${quadrasDaObra(o).length}</td><td>${S.list.filter(x => obraT(x) === o).length}</td><td><button class="btn sm rw" data-act="cadObra" data-o="${esc(o)}">Editar</button></td></tr>`).join('')}</tbody></table></div></div>
       <div class="card"><h2>Contas bancárias <button class="btn sm" data-act="cadConta">Adicionar</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Conta</th><th>Saldo inicial</th><th>Saldo atual</th><th></th></tr></thead><tbody>
-        ${saldos().contas.map(c => `<tr><td class="l"><b>${esc(c.nome)}</b></td><td>${brl2(c.inicial)}</td><td class="${cls(c.saldo)}">${brl2(c.saldo)}</td><td>${e.contas.some(x => x.nome === c.nome) ? `<button class="btn sm" data-act="cadConta" data-nome="${esc(c.nome)}">Editar</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>
+        ${saldos().contas.map(c => `<tr><td class="l"><b>${esc(c.nome)}</b>${variasEmpresas() ? `<br><span class="muted small">${esc(empRotulo(empPorId(empConta(c.nome)), true))}</span>` : ''}</td><td>${brl2(c.inicial)}</td><td class="${cls(c.saldo)}">${brl2(c.saldo)}</td><td>${e.contas.some(x => x.nome === c.nome) ? `<button class="btn sm" data-act="cadConta" data-nome="${esc(c.nome)}">Editar</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>
     </div>
+    <div class="card"><h2>Empresas (CNPJ) <button class="btn sm rw" data-act="cadEmp">Nova filial</button></h2>
+      <p class="muted small">Cadastre a matriz e cada filial aberta para um projeto no RET. Cada obra pertence a um CNPJ, e os lançamentos da obra vão para ele.</p>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Empresa</th><th class="l">CNPJ</th><th class="l">Tipo</th><th class="l">Obras</th><th>Lançamentos</th><th></th></tr></thead><tbody>
+      ${e.empresas.map(x => `<tr><td class="l"><b>${esc(x.nome)}</b></td><td class="l fig">${esc(fCnpj(x.cnpj)) || '<span class="muted">não informado</span>'}</td><td class="l"><span class="chip ${x.tipo === 'matriz' ? 'ok' : ''}">${x.tipo === 'matriz' ? 'Matriz' : 'Filial'}${x.ret ? ' · RET' : ''}</span></td><td class="l wrap">${esc(e.obras.filter(o => empDaObra(o) === x.id).join(', ')) || '<span class="muted">nenhuma</span>'}</td><td>${S.list.filter(t => empT(t) === x.id).length}</td><td><button class="btn sm rw" data-act="cadEmp" data-id="${esc(x.id)}">Editar</button></td></tr>`).join('')}</tbody></table></div></div>
     <div class="card"><h2>Quadras e lotes <button class="btn sm" data-act="cadQuadra">Adicionar quadra</button></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th>${variasObras() ? '<th class="l">Obra</th>' : ''}<th>Lotes</th><th class="l">Numeração</th><th>Lançamentos</th><th></th></tr></thead><tbody>
       ${e.quadras.map(q => { const ls = lotesDe(q); return `<tr><td class="l"><b>${esc(q)}</b></td>${variasObras() ? `<td class="l">${esc(obraDe(q))}</td>` : ''}<td>${ls.length}</td><td class="l wrap muted small">${esc(ls.slice(0, 30).join(', '))}${ls.length > 30 ? '…' : ''}</td><td>${usados('quadra', q)}</td><td><button class="btn sm" data-act="cadQuadra" data-q="${esc(q)}">Editar</button></td></tr>`; }).join('')}</tbody></table></div></div>
     <div class="card"><h2>Destinos (categorias)</h2><div class="grid two">${['op', 'nonop', 'rec', 'aporte'].map(s => `<div><div class="lbl">${SECAO_NOME[s]} <button class="btn link sm" data-act="cadDest" data-s="${s}">+ adicionar</button></div><div class="chips">${(e.destinos[s] || []).map(d => `<span class="chip">${esc(d)} <button class="x" data-act="rmDest" data-s="${s}" data-d="${esc(d)}" aria-label="Remover">×</button></span>`).join('')}</div></div>`).join('')}</div></div>
@@ -1156,11 +1205,45 @@ ACOES.cadFeriado = () => {
   f.el.querySelector('#fx').onsubmit = ev => { ev.preventDefault(); const F = ev.target; const n = clone(E()); n.feriados = [...n.feriados, { d: F.anual.checked ? F.d.value.slice(5) : F.d.value, nome: F.nome.value.trim() }]; n.feriados.sort((a, b) => a.d.slice(-5).localeCompare(b.d.slice(-5))); salvarEstrutura(n); f.fechar(); toast('Feriado adicionado'); };
 };
 ACOES.rmFeriado = d => { const n = clone(E()); n.feriados = n.feriados.filter((_, i) => i !== +d.i); salvarEstrutura(n); };
+ACOES.tema = d => aplicarTema(d.v);
+ACOES.temaCiclo = () => { const o = ['auto', 'claro', 'escuro']; const m = o[(o.indexOf(temaPref()) + 1) % 3]; aplicarTema(m); toast('Tema: ' + TEMAS.find(x => x[0] === m)[1]); };
+ACOES.cadEmp = d => {
+  const x = d.id ? empPorId(d.id) : null; const e = E();
+  const nT = x ? S.list.filter(t => empT(t) === x.id).length : 0, nO = x ? e.obras.filter(o => empDaObra(o) === x.id).length : 0;
+  const pode = x && x.tipo !== 'matriz' && !nT && !nO && !e.contas.some(c => c.emp === x.id);
+  const f = folha(x ? x.nome : 'Nova filial', `<form class="form" id="fx">
+    <label>Nome<input name="nome" value="${esc(x?.nome || '')}" required placeholder="Ex.: SFG Araripina SPE"></label>
+    <div class="g2"><label>CNPJ<input name="cnpj" inputmode="numeric" value="${esc(fCnpj(x?.cnpj || ''))}" placeholder="00.000.000/0000-00"></label>
+    <label>Tipo<select name="tipo">${opts([['filial', 'Filial'], ['matriz', 'Matriz']], x?.tipo || 'filial')}</select></label></div>
+    <label class="chk"><input type="checkbox" name="ret" ${x ? (x.ret ? 'checked' : '') : 'checked'}> Optante pelo RET (patrimônio de afetação)</label>
+    <label>Obras desta empresa<div class="chips">${e.obras.map(o => `<label class="chip"><input type="checkbox" name="obras" value="${esc(o)}" ${x && empDaObra(o) === x.id ? 'checked' : ''}> ${esc(o)}</label>`).join('')}</div></label>
+    <p class="muted small" id="cnpjAviso"></p>
+    ${x && nT ? `<p class="muted small">${nT} lançamento(s) nesta empresa.</p>` : ''}
+    <div class="acts">${pode ? '<button type="button" class="btn danger ghost" id="rm">Remover</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
+  const F = f.el.querySelector('#fx');
+  const aviso = () => { const v = F.cnpj.value.replace(/\D/g, ''); $('#cnpjAviso', F).textContent = v && !cnpjValido(v) ? 'Atenção: esse CNPJ parece inválido (confira os dígitos).' : ''; };
+  F.cnpj.oninput = aviso; F.cnpj.onblur = () => { F.cnpj.value = fCnpj(F.cnpj.value.replace(/\D/g, '')) || F.cnpj.value; aviso(); };
+  F.onsubmit = ev => {
+    ev.preventDefault(); const n = clone(E());
+    const cnpj = F.cnpj.value.replace(/\D/g, ''); const nome = F.nome.value.trim(); if (!nome) return;
+    if (cnpj && n.empresas.some(y => y.cnpj === cnpj && (!x || y.id !== x.id))) { toast('Esse CNPJ já está cadastrado', 'err'); return; }
+    const id = x ? x.id : uid();
+    const obj = { id, nome, cnpj, tipo: F.tipo.value, ret: F.ret.checked };
+    if (x) n.empresas = n.empresas.map(y => y.id === id ? obj : y); else n.empresas.push(obj);
+    if (obj.tipo === 'matriz') n.empresas.forEach(y => { if (y.id !== id && y.tipo === 'matriz') y.tipo = 'filial'; });
+    if (!n.empresas.some(y => y.tipo === 'matriz')) n.empresas[0].tipo = 'matriz';
+    const marcadas = $$('[name=obras]:checked', F).map(c => c.value);
+    for (const o of n.obras) { if (marcadas.includes(o)) n.obraEmpresa[o] = id; else if (n.obraEmpresa[o] === id) delete n.obraEmpresa[o]; }
+    salvarEstrutura(n); f.fechar(); toast(x ? 'Empresa salva' : 'Filial cadastrada');
+  };
+  const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { const n = clone(E()); n.empresas = n.empresas.filter(y => y.id !== x.id); salvarEstrutura(n); f.fechar(); };
+};
 ACOES.cadObra = d => {
   const o = d.o; const e = E();
   const nQ = o ? quadrasDaObra(o).length : 0, nT = o ? S.list.filter(x => obraT(x) === o).length : 0;
   const pode = o && e.obras.length > 1 && !nQ && !nT;
   const f = folha(o ? 'Obra ' + o : 'Nova obra', `<form class="form" id="fx"><label>Nome da obra (local)<input name="v" value="${esc(o || '')}" required placeholder="Ex.: Araripina"></label>
+    ${variasEmpresas() ? `<label>Empresa (CNPJ) da obra<select name="emp">${opts(empOpts(), o ? empDaObra(o) : matrizId())}</select></label>` : ''}
     ${o ? `<p class="muted small">${nQ} quadra(s) e ${nT} lançamento(s) nesta obra. Ao renomear, os lançamentos passam a usar o novo nome.${e.obras.length > 1 && !pode ? ' Para remover, a obra não pode ter quadras nem lançamentos.' : ''}</p>` : '<p class="muted small">Depois de criar, cadastre as quadras e lotes dela em Quadras e lotes, escolhendo esta obra.</p>'}
     <div class="acts">${pode ? '<button type="button" class="btn danger ghost" id="rm">Remover obra</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fx');
@@ -1174,6 +1257,8 @@ ACOES.cadObra = d => {
       const mud = S.list.filter(x => obraT(x) === o && x.local !== nome).map(x => ({ ...x, local: nome, alterado: Date.now() }));
       if (mud.length) salvarTitulos(mud);
     }
+    if (o && nome !== o && n.obraEmpresa[o]) { n.obraEmpresa[nome] = n.obraEmpresa[o]; delete n.obraEmpresa[o]; }
+    if (F.emp) n.obraEmpresa[nome] = F.emp.value;
     n.local = n.obras[0]; salvarEstrutura(n); f.fechar(); toast(o ? 'Obra salva' : 'Obra criada');
   };
   const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { const n = clone(E()); n.obras = n.obras.filter(x => x !== o); n.local = n.obras[0]; salvarEstrutura(n); f.fechar(); };
@@ -1182,9 +1267,10 @@ ACOES.cadLocal = () => { const f = folha('Local da obra', `<form class="form" id
 ACOES.cadConta = d => {
   const c = E().contas.find(x => x.nome === d.nome);
   const f = folha(c ? 'Editar conta' : 'Nova conta bancária', `<form class="form" id="fx"><label>Nome<input name="nome" value="${esc(c?.nome || '')}" required ${c ? 'readonly' : ''}></label><label>Saldo inicial (R$)<input name="ini" inputmode="decimal" value="${c ? fNum2.format(c.inicial || 0) : '0,00'}"></label>
+    ${variasEmpresas() ? `<label>Empresa dona da conta<select name="emp">${opts(empOpts(), c ? empConta(c.nome) : matrizId())}</select></label>` : ''}
     <div class="acts">${c && !usados('conta', c.nome) ? '<button type="button" class="btn danger ghost" id="rm">Remover</button>' : ''}<button type="button" class="btn" data-close>Cancelar</button><button class="btn primary">Salvar</button></div></form>`);
   const F = f.el.querySelector('#fx');
-  F.onsubmit = e => { e.preventDefault(); const n = clone(E()); const nome = F.nome.value.trim(); const ini = parseBR(F.ini.value) || 0; const i = n.contas.findIndex(x => x.nome === nome); if (i >= 0) n.contas[i].inicial = ini; else n.contas.push({ nome, inicial: ini }); salvarEstrutura(n); f.fechar(); };
+  F.onsubmit = e => { e.preventDefault(); const n = clone(E()); const nome = F.nome.value.trim(); const ini = parseBR(F.ini.value) || 0; const i = n.contas.findIndex(x => x.nome === nome); if (i >= 0) n.contas[i].inicial = ini; else n.contas.push({ nome, inicial: ini }); if (F.emp) n.contas[i >= 0 ? i : n.contas.length - 1].emp = F.emp.value; salvarEstrutura(n); f.fechar(); };
   const rm = f.el.querySelector('#rm'); if (rm) rm.onclick = () => { const n = clone(E()); n.contas = n.contas.filter(x => x.nome !== c.nome); salvarEstrutura(n); f.fechar(); };
 };
 ACOES.cadQuadra = d => {
@@ -1649,6 +1735,53 @@ service cloud.firestore {
     }
   }
 }`;
+let filtroPendente = null, empPer = 'ano';
+ACOES.verEmp = d => { filtroPendente = { emp: d.id, ...(d.modo === 'extrato' ? { per: empPer === 'ano' ? 'ano' : 'todos' } : { st: 'aberto', per: 'todos' }) }; location.hash = '#/' + d.modo; };
+ACOES.empPer = d => { empPer = d.v; refreshView(); };
+function resumoEmpresa(id) {
+  const h = hoje(), ano = h.slice(0, 4);
+  const ts = S.list.filter(t => empT(t) === id);
+  const noPer = t => empPer !== 'ano' || (dataRef(t) || '').startsWith(ano);
+  const real = ts.filter(t => pago(t) && noPer(t)), ab = ts.filter(t => !pago(t));
+  const ap = t => t.destino === 'Aporte';
+  const r = {
+    id, n: ts.length,
+    recebido: sum(real.filter(t => !ap(t) && t.valor > 0), t => t.valor),
+    pago: sum(real.filter(t => !ap(t) && t.valor < 0), t => t.valor + Math.min(t.juros || 0, 0)),
+    aportes: sum(real.filter(ap), t => t.valor),
+    receber: sum(ab.filter(t => !ap(t) && t.valor > 0), t => t.valor),
+    pagar: sum(ab.filter(t => !ap(t) && t.valor < 0), t => t.valor),
+    vencido: sum(ab.filter(t => t.valor < 0 && t.venc < h), t => t.valor),
+    contas: saldos().contas.filter(c => empConta(c.nome) === id)
+  };
+  r.resultado = r.recebido + r.pago; r.projetado = r.resultado + r.receber + r.pagar; r.saldo = sum(r.contas, c => c.saldo);
+  return r;
+}
+VIEWS.empresas = {
+  titulo: 'Empresas',
+  refresh(el) {
+    const e = E(); const rs = e.empresas.map(x => ({ x, ...resumoEmpresa(x.id) }));
+    const T = k => sum(rs, r => r[k]);
+    const linha = (lab, v, extra = '') => `<div class="kv"><span>${lab}</span><b class="fig ${cls(v)}">${brl2(v)}</b>${extra}</div>`;
+    el.innerHTML = `${e.empresas.length < 2 ? `<div class="alerta-caixa"><span>Só a matriz está cadastrada. Cadastre as filiais do RET em Cadastros, em Empresas (CNPJ), e escolha a empresa de cada obra.</span><a class="btn sm" href="#/cadastros">Ir para Cadastros</a></div>` : ''}
+      <div class="seg">${[['ano', 'Realizado em ' + hoje().slice(0, 4)], ['todos', 'Realizado desde o início']].map(([v, l]) => `<button class="${v === empPer ? 'on' : ''}" data-act="empPer" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="grid two emp-grid">${rs.map(r => `<div class="card emp-card">
+        <h2><span>${esc(r.x.nome)}<small class="muted fig">${esc(fCnpj(r.x.cnpj)) || 'CNPJ não informado'}</small></span><span class="chip ${r.x.tipo === 'matriz' ? 'ok' : ''}">${r.x.tipo === 'matriz' ? 'Matriz' : 'Filial'}${r.x.ret ? ' · RET' : ''}</span></h2>
+        <p class="muted small">${esc(e.obras.filter(o => empDaObra(o) === r.id).join(', ')) || 'Nenhuma obra vinculada'}${r.contas.length ? ' · contas: ' + esc(r.contas.map(c => c.nome).join(', ')) : ''}</p>
+        ${linha('Saldo nas contas', r.saldo)}
+        ${linha('Recebido', r.recebido)}${linha('Pago', r.pago)}
+        ${linha('Resultado realizado', r.resultado)}
+        ${r.aportes ? linha('Aportes / transferências', r.aportes) : ''}
+        ${linha('A receber', r.receber)}${linha('A pagar', r.pagar, r.vencido ? `<small class="neg">${brl2(r.vencido)} vencido</small>` : '')}
+        ${linha('Resultado projetado', r.projetado)}
+        <div class="acts" style="justify-content:flex-start"><button class="btn sm" data-act="verEmp" data-id="${esc(r.id)}" data-modo="pagar">Contas a pagar</button><button class="btn sm" data-act="verEmp" data-id="${esc(r.id)}" data-modo="receber">A receber</button><button class="btn sm" data-act="verEmp" data-id="${esc(r.id)}" data-modo="extrato">Extrato</button></div>
+      </div>`).join('')}</div>
+      ${rs.length > 1 ? `<div class="card"><h2>Consolidado</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Empresa</th><th>Saldo contas</th><th>Recebido</th><th>Pago</th><th>Resultado</th><th>A receber</th><th>A pagar</th><th>Projetado</th></tr></thead><tbody>
+        ${rs.map(r => `<tr><td class="l"><b>${esc(r.x.nome)}</b><br><span class="muted small">${esc(fCnpj(r.x.cnpj))}</span></td><td class="${cls(r.saldo)}">${brl(r.saldo)}</td><td class="pos">${brl(r.recebido)}</td><td class="neg">${brl(r.pago)}</td><td class="${cls(r.resultado)}"><b>${brl(r.resultado)}</b></td><td>${brl(r.receber)}</td><td>${brl(r.pagar)}</td><td class="${cls(r.projetado)}"><b>${brl(r.projetado)}</b></td></tr>`).join('')}
+        <tr class="tot"><td class="l"><b>Total do grupo</b></td><td class="${cls(T('saldo'))}">${brl(T('saldo'))}</td><td>${brl(T('recebido'))}</td><td>${brl(T('pago'))}</td><td><b>${brl(T('resultado'))}</b></td><td>${brl(T('receber'))}</td><td>${brl(T('pagar'))}</td><td><b>${brl(T('projetado'))}</b></td></tr></tbody></table></div>
+        <p class="muted small">Aportes e transferências entre CNPJs (destino Aporte) ficam fora do resultado, para não contar a mesma receita duas vezes.</p></div>` : ''}`;
+  }
+};
 VIEWS.usuarios = {
   titulo: 'Usuários e acesso',
   refresh(el) {
@@ -1671,7 +1804,7 @@ ACOES.usrDel = async d => { const a = S.acesso || {}; if (!(await confirmar(`Rem
 /* ---------- Mais (celular) ---------- */
 VIEWS.mais = {
   titulo: 'Mais',
-  refresh(el) { el.innerHTML = NAV.filter(([k]) => !['inicio', 'pagar', 'receber', 'obras'].includes(k)).map(([k, n]) => k === '#' ? `<div class="eyebrow" style="margin:14px 4px 6px">${n}</div>` : `<a class="menu-item" href="#/${k}">${ic(k)}<span>${n}</span></a>`).join(''); }
+  refresh(el) { el.innerHTML = `<div class="card"><h2>Aparência</h2>${seletorTema()}</div>` + NAV.filter(([k]) => !['inicio', 'pagar', 'receber', 'obras'].includes(k)).map(([k, n]) => k === '#' ? `<div class="eyebrow" style="margin:14px 4px 6px">${n}</div>` : `<a class="menu-item" href="#/${k}">${ic(k)}<span>${n}</span></a>`).join(''); }
 };
 
 /* ---------- Dados ---------- */
@@ -1697,8 +1830,8 @@ async function baixarArquivo(blob, nome) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
 }
 function exportarExcel() {
-  const cab = ['Item', 'R$', 'Juros e Multa', 'NF', 'Local', 'Quadra', 'Lote', 'Destino', 'Data', 'Vencimento', 'Conta', 'Fornecedor', 'Observação', 'Quantidade', 'Unidade', 'Nº NF', 'Anexo (Drive)'];
-  const lin = t => [t.item, t.valor, t.juros || 0, !!t.nf, t.local || E().local, t.quadra, isNaN(+t.lote) || t.lote === '' ? t.lote : +t.lote, t.destino, pago(t) ? (t.pag || t.venc) : t.venc, t.venc, t.conta || '', t.forn || '', t.obs || '', t.qtd || '', t.unid || '', t.nfNum || '', t.anexoLink || ''];
+  const cab = ['Item', 'R$', 'Juros e Multa', 'NF', 'Local', 'Quadra', 'Lote', 'Destino', 'Data', 'Vencimento', 'Conta', 'Fornecedor', 'Observação', 'Quantidade', 'Unidade', 'Nº NF', 'Anexo (Drive)', 'Empresa', 'CNPJ'];
+  const lin = t => [t.item, t.valor, t.juros || 0, !!t.nf, t.local || E().local, t.quadra, isNaN(+t.lote) || t.lote === '' ? t.lote : +t.lote, t.destino, pago(t) ? (t.pag || t.venc) : t.venc, t.venc, t.conta || '', t.forn || '', t.obs || '', t.qtd || '', t.unid || '', t.nfNum || '', t.anexoLink || '', empPorId(empT(t))?.nome || '', fCnpj(empPorId(empT(t))?.cnpj || '')];
   const toDate = r => { for (const i of [8, 9]) if (r[i]) { const [y, m, d] = r[i].split('-').map(Number); r[i] = new Date(Date.UTC(y, m - 1, d)); } return r; };
   const sheet = rows => { const ws = XLSX.utils.aoa_to_sheet([cab, ...rows.map(lin).map(toDate)], { cellDates: true }); ws['!cols'] = [{ wch: 44 }, { wch: 14 }, { wch: 12 }, { wch: 5 }, { wch: 14 }, { wch: 7 }, { wch: 6 }, { wch: 16 }, { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 20 }, { wch: 24 }]; return ws; };
   const wb = XLSX.utils.book_new();
