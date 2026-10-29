@@ -2006,7 +2006,7 @@ function lerExtratoBanco(txt) {
 function analisarConc(conta) {
   const ex = S.extratos && S.extratos[contaId(conta)]; if (!ex) return null;
   const linhas = Object.values(ex.linhas || {}).map(j => { try { return JSON.parse(j); } catch (e) { return null; } }).filter(Boolean).sort((a, b) => b.d.localeCompare(a.d));
-  if (!linhas.length) return { ex, linhas: [] };
+  if (!linhas.length) return null;
   const ini = addDays(linhas[linhas.length - 1].d, -40), fim = addDays(linhas[0].d, 40);
   const ts = S.list.filter(t => { const d = dataRef(t) || ''; return d >= ini && d <= fim; });
   const conc = new Map(); for (const t of S.list) if (t.conc) (conc.get(t.conc) || conc.set(t.conc, []).get(t.conc)).push(t);
@@ -2017,12 +2017,13 @@ function analisarConc(conta) {
   const out = linhas.map(l => {
     if (conc.has(l.id)) return { ...l, st: 'ok', ts: conc.get(l.id) };
     if (l.ign) return { ...l, st: 'ign', ts: [] };
-    let c = livres.find(t => !usado.has(t.id) && pago(t) && (t.conta || '') === conta && Math.abs(val(t) - l.v) < 0.01 && dias(t.pag || t.venc, l.d) <= 5);
+    const rej = new Set(l.rej || []); const okT = t => !usado.has(t.id) && !rej.has(t.id);
+    let c = livres.find(t => okT(t) && pago(t) && (t.conta || '') === conta && Math.abs(val(t) - l.v) < 0.01 && dias(t.pag || t.venc, l.d) <= 5);
     if (c) { usado.add(c.id); return { ...l, st: 'auto', ts: [c] }; }
-    for (const g of grupos.values()) if (g.length > 1 && pago(g[0]) && (g[0].conta || '') === conta && !g.some(t => usado.has(t.id)) && Math.abs(sum(g, val) - l.v) < 0.01 && dias(g[0].pag || g[0].venc, l.d) <= 5) { g.forEach(t => usado.add(t.id)); return { ...l, st: 'auto', ts: g }; }
-    c = livres.find(t => !usado.has(t.id) && !pago(t) && Math.abs(t.valor - l.v) < 0.01 && dias(t.venc, l.d) <= 25);
+    for (const g of grupos.values()) if (g.length > 1 && pago(g[0]) && (g[0].conta || '') === conta && !g.some(t => usado.has(t.id) || rej.has(t.id)) && Math.abs(sum(g, val) - l.v) < 0.01 && dias(g[0].pag || g[0].venc, l.d) <= 5) { g.forEach(t => usado.add(t.id)); return { ...l, st: 'auto', ts: g }; }
+    c = livres.find(t => okT(t) && !pago(t) && Math.abs(t.valor - l.v) < 0.01 && dias(t.venc, l.d) <= 25);
     if (c) { usado.add(c.id); return { ...l, st: 'sug', ts: [c] }; }
-    for (const g of grupos.values()) if (g.length > 1 && !pago(g[0]) && !g.some(t => usado.has(t.id)) && Math.abs(sum(g, t => t.valor) - l.v) < 0.01 && dias(g[0].venc, l.d) <= 25) { g.forEach(t => usado.add(t.id)); return { ...l, st: 'sug', ts: g }; }
+    for (const g of grupos.values()) if (g.length > 1 && !pago(g[0]) && !g.some(t => usado.has(t.id) || rej.has(t.id)) && Math.abs(sum(g, t => t.valor) - l.v) < 0.01 && dias(g[0].venc, l.d) <= 25) { g.forEach(t => usado.add(t.id)); return { ...l, st: 'sug', ts: g }; }
     return { ...l, st: 'novo', ts: [] };
   });
   return { ex, linhas: out };
@@ -2041,14 +2042,15 @@ VIEWS.conciliacao = {
     el.innerHTML = `<div class="filtros card"><label class="tgl">Conta <select id="cc">${opts(contas, concConta)}</select></label>
       <label class="btn primary file rw">Importar extrato (OFX ou CSV)<input type="file" id="cfile" accept=".ofx,.OFX,.csv,.txt" hidden></label>
       ${ls.some(l => l.st === 'auto') ? `<button class="btn rw" id="cAll">Confirmar todas encontradas (${ls.filter(l => l.st === 'auto').length})</button>` : ''}
-      <label class="tgl"><input type="checkbox" id="cTodas" ${concTodas ? 'checked' : ''}> Mostrar já conciliadas</label></div>
+      <label class="tgl"><input type="checkbox" id="cTodas" ${concTodas ? 'checked' : ''}> Mostrar já conciliadas e ignoradas</label>
+      ${a && a.linhas.length ? '<button class="btn ghost rw" data-act="cLimpar">Limpar extrato</button>' : ''}</div>
     ${!a ? `<div class="card empty"><h2>Nenhum extrato importado para ${esc(concConta)}</h2><p class="muted">No app ou internet banking do banco, exporte o extrato do período em <b>OFX</b> (ou CSV) e importe aqui. O sistema casa cada linha com os lançamentos, inclusive rateios por lote.</p></div>` : `
     <div class="grid kpis k4">${kpi('Saldo no banco', a.ex.saldo != null ? brl2(a.ex.saldo) : '—', a.ex.saldoData ? 'em ' + dBR(a.ex.saldoData) : 'o arquivo não trouxe saldo', '')}${kpi('Saldo no sistema', brl2(sd ? sd.saldo : 0), esc(concConta), '')}${kpi('Conciliadas', ls.filter(l => l.st === 'ok').length + ' de ' + ls.filter(l => l.st !== 'ign').length, '', 'pos')}${kpi('Precisam de você', pend.length, ls.filter(l => l.st === 'sug').length + ' sugestão(ões) · ' + ls.filter(l => l.st === 'novo').length + ' sem lançamento', pend.length ? 'neg' : '')}</div>
     ${a.ex.saldo != null && sd && Math.abs(a.ex.saldo - sd.saldo) > 0.01 && !pend.length ? `<div class="alert">Tudo conciliado, mas o saldo do banco difere do sistema em ${brl2(a.ex.saldo - sd.saldo)}. Pode haver lançamentos anteriores ao período do extrato ou saldo inicial da conta a ajustar em Cadastros.</div>` : ''}
     <div class="card"><div class="tbl-wrap"><table class="tbl ftbl"><thead><tr><th class="l">Data</th><th class="l">No banco</th><th>Valor</th><th class="l">Situação</th><th class="l">No sistema</th><th></th></tr></thead><tbody>
     ${vis.map(l => { const [n, c] = ST_CONC[l.st]; const t0 = l.ts[0]; return `<tr><td class="l">${dBR(l.d)}</td><td class="l wrap">${esc(l.desc)}</td><td class="${cls(l.v)}"><b>${brl2(l.v)}</b></td><td class="l st"><span class="chip ${c}">${n}</span></td>
       <td class="l wrap">${t0 ? `<a href="#" data-act="abrir" data-id="${t0.id}">${esc(l.ts.length > 1 ? baseItem(t0) + ' · ' + l.ts.length + ' lotes' : t0.item)}</a><br><span class="muted small">${pago(t0) ? 'Pago ' + dBR(t0.pag) : 'Em aberto · vence ' + dBR(t0.venc)}</span>` : l.st === 'novo' ? '<span class="muted">Nenhum lançamento com este valor e data</span>' : ''}</td>
-      <td class="rw">${l.st === 'auto' ? `<button class="btn sm" data-act="cOk" data-id="${l.id}">Confirmar</button>` : l.st === 'sug' ? `<button class="btn sm primary" data-act="cBx" data-id="${l.id}">Dar baixa</button>` : l.st === 'novo' ? `<button class="btn sm" data-act="cNovo" data-id="${l.id}">Criar lançamento</button> <button class="btn sm link" data-act="cIgn" data-id="${l.id}">Ignorar</button>` : l.st === 'ok' ? `<button class="btn sm link" data-act="cDes" data-id="${l.id}">Desfazer</button>` : `<button class="btn sm link" data-act="cIgn" data-id="${l.id}" data-v="0">Reativar</button>`}</td></tr>`; }).join('') || '<tr><td colspan="6" class="l muted">Nada pendente. Tudo conciliado.</td></tr>'}
+      <td class="rw conc-acts">${l.st === 'auto' ? `<button class="btn sm" data-act="cOk" data-id="${l.id}">Confirmar</button>${botoesConcExtra(l)}` : l.st === 'sug' ? `<button class="btn sm primary" data-act="cBx" data-id="${l.id}">Dar baixa</button>${botoesConcExtra(l)}` : l.st === 'novo' ? `<button class="btn sm" data-act="cNovo" data-id="${l.id}">Criar lançamento</button> <button class="btn sm" data-act="cEsc" data-id="${l.id}">Escolher lançamento</button> <button class="btn sm link" data-act="cIgn" data-id="${l.id}">Ignorar</button>` : l.st === 'ok' ? `<button class="btn sm link" data-act="cDes" data-id="${l.id}">Desfazer</button>` : `<button class="btn sm link" data-act="cIgn" data-id="${l.id}" data-v="0">Reativar</button>`}</td></tr>`; }).join('') || '<tr><td colspan="6" class="l muted">Nada pendente. Tudo conciliado.</td></tr>'}
     </tbody></table></div></div>`}`;
     $('#cc', el).onchange = e => { concConta = e.target.value; this.refresh(el); };
     $('#cTodas', el).onchange = e => { concTodas = e.target.checked; this.refresh(el); };
