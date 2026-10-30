@@ -711,6 +711,7 @@ function formNovo(def = {}) {
     <div id="boxParc"></div>
     <div id="boxReal" class="g3"><label>Data do pagamento<input type="date" name="pag" value="${def.pag || h}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome), def.conta)}</select></label><label>Juros / multa (R$) <span class="muted">fora do valor</span><input name="jurosR" inputmode="decimal" placeholder="0,00"></label></div>
     <div class="g2"><label>Quantidade <span class="muted">(opcional, para histórico de preço)</span><input name="qtd" inputmode="decimal" placeholder="Ex.: 200"></label><label>Unidade<input name="unid" list="dlUnid" placeholder="sc, m³, un, kg"></label></div><datalist id="dlUnid"><option value="sc"><option value="m³"><option value="m²"><option value="un"><option value="kg"><option value="t"><option value="milheiro"><option value="m"></datalist>
+    <div id="rowAbat"><label>Desconta de uma conta já prevista? <span class="muted">(ex.: adiantamento da mão de obra que estava em contas a pagar)</span><select name="abat"><option value="">Não: é um gasto a mais, fora do previsto</option></select></label><p class="hint-data info" id="abatHint"></p></div>
     <div class="g2"><label class="chk"><input type="checkbox" name="nf"> Tem nota fiscal</label><label>Número da NF<input name="nfNum" inputmode="numeric" placeholder="opcional"></label></div>
     <label>Observação<textarea name="obs" rows="2"></textarea></label>
     <div id="boxAnexos" class="anx"></div>
@@ -814,10 +815,22 @@ function formNovo(def = {}) {
   F.ambito.onchange = () => { modoAmbito(F); if (F.ambito.value === 'empresa') $$('[name=qsel]', F).forEach(c => c.checked = false); lotesBox(); recalcParc(); sincEmp(F); prev(); }; modoAmbito(F);
   F.destino.addEventListener('change', () => sincAporte(F)); sincAporte(F);
   F.item.addEventListener('change', () => aplicarRegrasForm(F, tipo));
+  let abatGrupos = {};
+  const montaAbat = () => { const sel = F.abat; const cur = sel.value; $('#rowAbat', F).classList.toggle('hidden', tipo !== 'saida' || ehRec());
+    if (tipo !== 'saida') { sel.value = ''; return; }
+    const qs = new Set(F.ambito.value === 'empresa' ? [] : qsMarcadas()); abatGrupos = gruposPrevistos(qs, F.destino.value, F.forn.value.trim());
+    sel.innerHTML = '<option value="">Não: é um gasto a mais, fora do previsto</option>' + Object.entries(abatGrupos).slice(0, 80).map(([k, g]) => `<option value="${esc(k)}">${esc(g.rot)}</option>`).join('');
+    if (abatGrupos[cur]) sel.value = cur; abatHint(); };
+  const abatHint = () => { const g0 = abatGrupos[F.abat.value]; const v = parseBR(F.valor.value) || 0; const tot = F.modo.value === 'cada' ? v * nLotes() * nParc() : v;
+    let g = g0; if (g0) { const ls = new Set(pares().filter(p => p[1] !== '-').map(p => p[0] + '|' + p[1])); const so = g0.ids.map(id => S.byId.get(id)).filter(t => t && ls.has(t.quadra + '|' + t.lote)); if (ls.size && so.length) g = { total: -sum(so, t => t.valor) }; }
+    $('#abatHint', F).textContent = !g ? '' : (g !== g0 ? 'Só as partes dos lotes marcados. ' : '') + (tot > g.total + 0.004 ? `O valor é maior que o previsto (${brl2(g.total)}): a conta prevista será zerada e o excedente fica como gasto a mais.` : `Desconta ${brl2(tot)} de ${brl2(g.total)} previstos; restam ${brl2(g.total - tot)} em aberto.`); };
+  F.abat.onchange = abatHint; F.addEventListener('input', e => { if (['valor', 'modo'].includes(e.target.name)) abatHint(); });
+  F.addEventListener('change', e => { if (['destino', 'qsel', 'ambito', 'forn'].includes(e.target.name)) montaAbat(); else if (e.target.name === 'lotes') abatHint(); });
+  $$('#segTipo button', F).forEach(b => b.addEventListener('click', () => setTimeout(montaAbat, 0)));
   F.realizado.onchange = () => { real(); prev(); };
   F.recorrente.onchange = () => { modoRec(); prev(); }; modoRec();
   F.addEventListener('input', prev); F.addEventListener('change', prev);
-  lotesBox(); real(); recalcParc(); prev();
+  lotesBox(); real(); recalcParc(); prev(); montaAbat();
   const anx = caixaAnexos($('#boxAnexos', F), () => F.realizado.checked ? 'comprovante' : 'nota');
   const aplicarLido = (o, arquivos) => {
     const feito = [];
@@ -875,7 +888,9 @@ function formNovo(def = {}) {
     const g = gerar(); if (g.erro) { toast(g.erro, 'err'); return; } if (!g.lista.length) { toast('Informe valores maiores que zero.', 'err'); return; }
     if (g.total > 60 && !(await confirmar(`Isso vai criar <b>${g.total}</b> lançamentos. Continuar?`, 'Criar', false))) return;
     if (anx.itens.length) { try { const lst = await anx.salvar(); g.lista.forEach(t => t.anexos = lst.map(x => ({ ...x }))); } catch (err) { toast(err.message, 'err'); return; } }
-    salvarTitulos(g.lista); f.fechar(); toast(g.total > 1 ? `${g.total} lançamentos criados` : 'Lançamento salvo');
+    salvarTitulos(g.lista);
+    if (F.abat.value && abatGrupos[F.abat.value] && tipo === 'saida') { const r = abaterPrevisto(abatGrupos[F.abat.value], -sum(g.lista, t => t.valor), g.lista[0], new Set(g.lista.filter(t => t.lote && t.lote !== '-').map(t => t.quadra + '|' + t.lote))); toast(r.zerou ? 'Lançado; a conta prevista foi totalmente descontada' : `Lançado; ${brl2(r.desc)} descontados da conta prevista (restam ${brl2(r.resta)})`); f.fechar(); return; }
+    f.fechar(); toast(g.total > 1 ? `${g.total} lançamentos criados` : 'Lançamento salvo');
     const fc = F.fornCnpj.value, fn = F.forn.value.trim(); if (fc && fn && !fornPorCnpj(fc) && !((S.fornecedores && S.fornecedores.lista) || {})[fn]) salvarForn(fn, { cnpj: fCnpj(fc), cat: F.destino.value });
   };
 }
@@ -931,20 +946,22 @@ function formBaixa(ids) {
   const f = folha(um ? (ent ? 'Registrar recebimento' : 'Registrar pagamento') : `Dar baixa em ${ts.length} lançamentos`, `<form id="fBx" class="form">
     <div class="resumo">${um ? `<b>${esc(t0.item)}</b><br><span class="muted">Vencimento ${dBR(t0.venc)}</span>` : `<b>${ts.length} lançamentos</b>`}<div class="big ${cls(tot)}">${brl2(tot)}</div></div>
     <div class="g2"><label>Data do ${ent ? 'recebimento' : 'pagamento'}<input type="date" name="pag" required value="${hoje()}"></label><label>Conta<select name="conta">${opts(E().contas.map(c => c.nome))}</select></label></div>
-    ${um ? `<div class="g2"><label>Valor ${ent ? 'recebido' : 'pago'} (sem juros)<input name="valor" inputmode="decimal" value="${fNum2.format(Math.abs(t0.valor))}"></label><label>Juros / multa (R$)<input name="juros" inputmode="decimal" placeholder="0,00"></label></div>` : `<label>Juros / multa total (R$) <span class="muted">— rateado proporcionalmente</span><input name="juros" inputmode="decimal" placeholder="0,00"></label>`}
+    ${um ? `<div class="g2"><label>Valor ${ent ? 'recebido' : 'pago'} (sem juros)<input name="valor" inputmode="decimal" value="${fNum2.format(Math.abs(t0.valor))}"></label><label>Juros / multa (R$)<input name="juros" inputmode="decimal" placeholder="0,00"></label></div>
+      <label class="chk hidden" id="rowResto"><input type="checkbox" name="resto" checked> <span id="txtResto">Pagamento parcial: manter o restante em aberto</span></label>` : `<label>Juros / multa total (R$) <span class="muted">— rateado proporcionalmente</span><input name="juros" inputmode="decimal" placeholder="0,00"></label>`}
     <label>Comprovante <span class="muted">(opcional, foto ou PDF)</span><input type="file" name="comp" accept="image/*,application/pdf"></label>
     <div class="acts"><button type="button" class="btn" data-close>Cancelar</button><button class="btn primary" type="submit">Confirmar baixa</button></div></form>`);
   const F = f.el.querySelector('#fBx');
+  if (um) { const rr = () => { const v = parseBR(F.valor.value); const falta = r2(Math.abs(t0.valor) - (v || 0)); $('#rowResto', F).classList.toggle('hidden', !(v >= 0 && falta >= 0.01)); $('#txtResto', F).textContent = `Pagamento parcial: manter ${brl2(falta)} em aberto (mesmo vencimento; dá para mudar depois)`; }; F.valor.addEventListener('input', rr); rr(); }
   F.onsubmit = async e => {
     e.preventDefault(); const j = parseBR(F.juros.value) || 0;
     let comp = null; if (F.comp.files[0]) { try { comp = await salvarAnexo(F.comp.files[0]); } catch (err) { toast(err.message, 'err'); return; } }
-    const out = ts.map(t => {
+    const resto = []; const out = ts.map(t => {
       const sg = t.valor < 0 ? -1 : 1; const n = { ...t, status: 'pago', pag: F.pag.value, conta: F.conta.value };
-      if (um) { const v = parseBR(F.valor.value); if (v >= 0) n.valor = sg * v; n.juros = j > 0 ? sg * j : 0; }
+      if (um) { const v = parseBR(F.valor.value); if (v >= 0) { const falta = r2(Math.abs(t.valor) - v); if (falta >= 0.01 && F.resto && F.resto.checked) resto.push({ ...t, id: uid(), valor: sg * falta, item: t.item.replace(/ \(saldo\)$/, '') + ' (saldo)', status: 'aberto', juros: 0, criado: Date.now(), anexos: [], hist: [] }); n.valor = sg * v; } n.juros = j > 0 ? sg * j : 0; }
       else n.juros = j > 0 ? sg * r2(j * Math.abs(t.valor) / Math.abs(tot || 1)) : 0;
       return comp ? comAnexos(n, [...anexosDe(n), { id: comp, tipo: 'comprovante' }]) : n;
     });
-    salvarTitulos(out); f.fechar(); listaSel.clear(); toast(um ? 'Baixa registrada' : `${out.length} baixas registradas`); refreshView();
+    salvarTitulos([...out, ...resto]); f.fechar(); listaSel.clear(); toast(resto.length ? `Pagamento parcial registrado; ${brl2(Math.abs(resto[0].valor))} continua em aberto` : um ? 'Baixa registrada' : `${out.length} baixas registradas`); refreshView();
   };
 }
 

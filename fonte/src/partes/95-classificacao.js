@@ -269,3 +269,25 @@ ACOES.quitarConv = d => {
     salvarTitulos(out); salvarTitulos(grupo.map(x => ({ ...x, quitada: venc })), { acao: 'devolução sem conversão' });
     f.fechar(); toast(pago_ ? 'Devolução registrada' : 'Devolução lançada em contas a pagar'); };
 };
+
+/* ---------- Gasto que desconta de uma conta já prevista (contas a pagar em aberto) ---------- */
+/* Agrupa as contas a pagar em aberto (as partes de um mesmo pagamento dividido entre lotes ficam juntas). */
+function gruposPrevistos(qs, destino, forn) {
+  const abertas = S.list.filter(t => !pago(t) && t.valor < 0 && (!qs.size || qs.has(t.quadra)));
+  const out = {}; for (const xs of gruposJuntar(abertas)) { const t0 = xs[0]; const k = 'g' + hashTxt(xs.map(t => t.id).join(','));
+    const qsg = [...new Set(xs.map(t => t.quadra).filter(q => q && q !== '-'))];
+    out[k] = { ids: xs.map(t => t.id), total: -sum(xs, t => t.valor), score: (t0.destino === destino ? 2 : 0) + (forn && normTxt(t0.forn) === normTxt(forn) ? 3 : 0), venc: t0.venc,
+      rot: `${baseItem(t0).replace(/\s*[-–]\s*[A-Z]\d*\s*$/, '')} · ${qsg.join(', ') || 'geral'}${xs.length > 1 ? ` (${xs.length} partes)` : ''} · vence ${dBR(t0.venc)} · ${brl2(-sum(xs, t => t.valor))}` }; }
+  return Object.fromEntries(Object.entries(out).sort((a, b) => b[1].score - a[1].score || a[1].venc.localeCompare(b[1].venc)));
+}
+/* Reduz as contas previstas do grupo pelo valor pago, na proporção de cada parte. */
+function abaterPrevisto(g, valor, ref, lotes) {
+  let ts = g.ids.map(id => S.byId.get(id)).filter(t => t && !pago(t));
+  /* Se o gasto é de lotes específicos e a conta prevista tem partes desses lotes, desconta só delas. */
+  if (lotes && lotes.size) { const so = ts.filter(t => lotes.has(t.quadra + '|' + t.lote)); if (so.length) ts = so; } const tot = -sum(ts, t => t.valor); if (!tot) return { desc: 0, resta: 0, zerou: true };
+  const desc = Math.min(valor, tot); const alterar = [], apagar = []; let usado = 0;
+  ts.forEach((t, i) => { const parte = i === ts.length - 1 ? r2(desc - usado) : r2(desc * (-t.valor) / tot); usado += parte; const novo = r2(t.valor + parte);
+    if (Math.abs(novo) < 0.01) apagar.push(t.id); else alterar.push({ ...t, valor: novo, obs: [t.obs, `Descontado ${brl2(parte)} por "${ref.item}" (${dBR(ref.pag || ref.venc)})`].filter(Boolean).join(' · ') }); });
+  if (alterar.length) salvarTitulos(alterar, { acao: 'descontado de outro pagamento' }); if (apagar.length) excluirTitulos(apagar);
+  return { desc, resta: r2(tot - desc), zerou: !alterar.length };
+}
