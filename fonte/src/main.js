@@ -2797,6 +2797,7 @@ const VISOES = [['mensal', 'Mensal'], ['trimestral', 'Trimestral'], ['semestral'
 const FIN_REC = ['Rendimento'];
 const valDem = t => (t.valor || 0);
 function dreDe(L, ini, fim, regime) {
+  if (regime === 'poc') return dreCompetencia(L, ini, fim);
   const noPer = t => regime === 'caixa' ? pago(t) && (t.pag || t.venc) >= ini && (t.pag || t.venc) <= fim : t.venc >= ini && t.venc <= fim;
   const ts = L.filter(t => noPer(t) && secaoDe(t.destino) !== 'aporte');
   const by = f => { const o = {}; for (const t of ts.filter(f)) o[t.destino] = (o[t.destino] || 0) + valDem(t); return o; };
@@ -2926,7 +2927,7 @@ VIEWS.demonstrativos = {
       <label class="tgl">Ano <select id="dA">${opts(anos, demAno)}</select></label>
       <label class="tgl">Visão <select id="dV">${opts(VISOES, demVis)}</select></label>
       ${demVis === 'mes' ? `<label class="tgl">Mês <select id="dM">${opts(MESES.map((m, i) => [String(i + 1).padStart(2, '0'), m]), demMes || hoje().slice(5, 7))}</select></label>` : ''}
-      ${demAba === 'dre' ? `<label class="tgl">Regime <select id="dR">${opts([['caixa', 'Caixa (pelo pagamento)'], ['comp', 'Competência (pelo vencimento)']], demReg)}</select></label>` : ''}
+      ${demAba === 'dre' ? `<label class="tgl">Regime <select id="dR">${opts([['caixa', 'Caixa (pelo pagamento)'], ['poc', 'Competência (venda + avanço da obra)'], ['comp', 'Por vencimento']], demReg)}</select></label>` : ''}
       <button class="btn primary" id="dPdf">Baixar PDF</button></div>
       <div class="seg">${[['dre', 'DRE'], ['dfc', 'Fluxo de caixa (DFC)'], ['bal', 'BP']].map(([v, l]) => `<button class="${v === demAba ? 'on' : ''}" data-act="demAba" data-v="${v}">${l}</button>`).join('')}</div>
       <div class="card"><h2>${demAba === 'dre' ? 'Demonstração do resultado' : demAba === 'dfc' ? 'Demonstração do fluxo de caixa (método direto)' : 'Balanço patrimonial (BP)'} <span class="muted small">${esc(nomeEmpPDF(demEmp))}</span></h2>
@@ -2941,7 +2942,7 @@ VIEWS.demonstrativos = {
 ACOES.demAba = d => { demAba = d.v; refreshView(); };
 function notaDem() {
   const base = 'Demonstrativos gerenciais montados a partir dos lançamentos do app; não substituem os da contabilidade.';
-  if (demAba === 'dre') return base + (demReg === 'caixa' ? ' Regime de caixa: entra o que foi pago ou recebido no período.' : ' Regime de competência: entra o que vence no período, pago ou não.') + ' Custos de obra são lançados como custo quando ocorrem (não há estoque de imóveis). Aportes ficam fora.';
+  if (demAba === 'dre') return base + (demReg === 'caixa' ? ' Regime de caixa: entra o que foi pago ou recebido no período; custos de obra entram quando pagos.' : demReg === 'poc' ? ' Competência: a receita de cada lote vendido é reconhecida conforme o avanço da obra dele (custo incorrido ÷ custo total previsto do lote), a partir da data da venda; o custo reconhecido é o custo incorrido desses lotes. Custo de lotes ainda não vendidos fica em estoque (não entra no resultado). Despesas, impostos e demais receitas entram pelo vencimento.' : ' Por vencimento: entra o que vence no período, pago ou não; custos de obra entram quando vencem.') + ' Aportes e financiamentos ficam fora.';
   if (demAba === 'dfc') return base + (demEmp ? ' O caixa da empresa considera todos os lançamentos do CNPJ, mesmo os pagos por conta de outra empresa do grupo.' : '');
   return base + ' Contas a pagar e a receber incluem as parcelas em aberto na data que já tinham sido lançadas ou vencidas até ela.' + (demEmp ? ' Créditos e débitos com empresas do grupo aparecem quando um CNPJ pagou ou recebeu por conta bancária de outro.' : '');
 }
