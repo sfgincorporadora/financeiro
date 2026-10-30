@@ -38,3 +38,13 @@ function ligarMultiSel(el, id, aoMudar) {
   d.addEventListener('toggle', () => { if (d.open) { $$('details.msel[open]').forEach(o => { if (o !== d) o.open = false; }); if (q) setTimeout(() => q.focus(), 30); } });
 }
 document.addEventListener('click', e => { if (!e.target.closest('details.msel')) $$('details.msel[open]').forEach(o => { o.open = false; }); });
+
+/* Números grandes com centavos: reduz a fonte do valor até caber no cartão (nunca corta o número). */
+function encaixarValores() {
+  for (const el of document.querySelectorAll('.kpi .val, .eh-val')) {
+    el.style.fontSize = ''; let tam = parseFloat(getComputedStyle(el).fontSize); let n = 0;
+    while (el.scrollWidth > el.clientWidth + 1 && tam > 12 && n++ < 20) { tam -= 1; el.style.fontSize = tam + 'px'; }
+  }
+}
+{ let tm = 0; const agenda = () => { clearTimeout(tm); tm = setTimeout(encaixarValores, 40); };
+  new MutationObserver(agenda).observe(document.documentElement, { childList: true, subtree: true }); addEventListener('resize', agenda); }
