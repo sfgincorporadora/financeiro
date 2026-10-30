@@ -417,7 +417,7 @@ const ic = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" f
 
 /* Menu: telas parecidas ficam juntas numa área com abas. */
 const AREAS = {
-  relatorios: ['Relatórios', [['demonstrativos', 'DRE, DFC e BP'], ['relatorios', 'Relatório mensal'], ['movimento', 'Histórico financeiro'], ['ret', 'Impostos (RET)']]],
+  relatorios: ['Relatórios', [['demonstrativos', 'DRE, DFC e BP'], ['indicadores', 'Indicadores das obras'], ['relatorios', 'Relatório mensal'], ['movimento', 'Histórico financeiro'], ['ret', 'Impostos (RET)']]],
   suprimentos: ['Contratos e compras', [['contratos', 'Contratos'], ['compras', 'Compras e cotações']]],
   planejamento: ['Planejamento', [['orcamento', 'Orçamento por etapa'], ['cronograma', 'Cronograma'], ['simulador', 'Simulador']]],
   documentos: ['Documentos e etapas', [['checklist', 'Checklist'], ['etapas', 'Fluxo do lote'], ['diario', 'Diário de obra']]],
