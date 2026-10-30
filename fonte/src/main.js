@@ -787,7 +787,7 @@ function formNovo(def = {}) {
         if (secaoDe(F.destino.value) === 'aporte' && F.aporteTipo.value) t.aporteTipo = F.aporteTipo.value;
         empDoForm(F, t);
         const qt = parseBR(F.qtd.value); if (qt > 0) { t.qtd = Math.round((F.modo.value === 'cada' ? qt : qt / total) * 1000) / 1000; t.unid = F.unid.value.trim(); }
-        if (def.conc && total === 1) t.conc = def.conc;
+        if (def.conc && n === 1) t.conc = def.conc;  /* todas as partes (lotes) da mesma linha do banco */
         out.push(t);
       }
     }
@@ -985,7 +985,7 @@ function detalhe(t) {
     ${(t.hist || []).length ? `<details class="hist"><summary>Histórico de alterações</summary><ol>${t.hist.slice().reverse().map(h => `<li>${histTxt(h)}</li>`).join('')}</ol><button class="btn link sm" data-act="histT" data-id="${esc(t.id)}">Ver histórico completo</button></details>` : ''}
     <div class="acts wrap">
       ${pago(t) ? `<button class="btn" id="dEst">Estornar baixa</button>` : `<button class="btn primary" id="dBx">${t.valor < 0 ? 'Registrar pagamento' : 'Registrar recebimento'}</button>`}
-      ${!pago(t) && t.valor > 0 ? `<button class="btn" data-act="pix" data-id="${esc(t.id)}">Cobrar por PIX</button>` : ''}${t.aporteTipo === 'conversivel' && t.valor > 0 && !t.conversao && !t.quitada ? `<button class="btn" data-act="converter" data-id="${esc(t.id)}">Converter em participação</button><button class="btn" data-act="quitarConv" data-id="${esc(t.id)}">Devolver com juros</button>` : ''}<button class="btn" id="dEd">Editar</button><button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
+      ${!pago(t) && t.valor > 0 ? `<button class="btn" data-act="pix" data-id="${esc(t.id)}">Cobrar por PIX</button>` : ''}${t.aporteTipo === 'conversivel' && t.valor > 0 && !t.conversao && !t.quitada ? `<button class="btn" data-act="converter" data-id="${esc(t.id)}">Converter em participação</button><button class="btn" data-act="quitarConv" data-id="${esc(t.id)}">Devolver com juros</button>` : ''}<button class="btn" id="dEd">Editar</button>${!ehEmpresa(t) && secaoDe(t.destino) !== 'aporte' ? `<button class="btn" data-act="redividir" data-id="${esc(t.id)}">Alterar quadras e lotes</button>` : ''}<button class="btn" id="dDup">Duplicar</button><button class="btn danger" id="dDel">Excluir</button>
       ${grupo.filter(x => !pago(x)).length > 1 ? `<button class="btn danger ghost" id="dDelG">Excluir ${grupo.filter(x => !pago(x)).length} em aberto do grupo</button>` : ''}
     </div>`);
   const on = (id, fn) => { const b = f.el.querySelector('#' + id); if (b) b.onclick = fn; };
