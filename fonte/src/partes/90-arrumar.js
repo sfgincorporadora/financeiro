@@ -67,6 +67,7 @@ function listaAlertas() {
   const semNota = candidatosArrumar('anexo').filter(t => t.criadoPor && (t.pag || t.venc) >= addDays(h, -45)).length;
   const emLotes = typeof candidatosRevisar === 'function' ? gruposJuntar(candidatosRevisar('empresa')).length : 0;
   if (emLotes) add('medio', `${emLotes} despesa(s) da empresa lançada(s) dividida(s) em lotes: revise e junte`, '#/arrumar', 'arrEmpresa');
+  if (typeof fins === 'function') { const pend = fins().filter(c => c.status !== 'quitado').reduce((s, c) => s + resumoFin(c).pend.length, 0); if (pend) add('medio', `${pend} repasse(s) de lotes financiados sem amortização lançada`, '#/financiamentos'); }
   if (semNota) add('baixo', `${semNota} pagamento(s) lançado(s) no app nos últimos 45 dias sem nota fiscal ou anexo`, '#/arrumar', 'arrAnexo');
   return A;
 }

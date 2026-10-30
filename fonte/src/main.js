@@ -383,6 +383,7 @@ const IC = {
   dados: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   mais: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  financiamentos: '<path d="M3 21h18M4 10h16M12 3l8 5H4l8-5zM6 10v8M10 10v8M14 10v8M18 10v8"/>',
   conciliacao: '<path d="M7 7h11l-3-3M17 17H6l3 3"/>',
   relatorios: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5"/>',
   cronograma: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -425,7 +426,7 @@ const AREAS = {
 };
 const areaDe = nome => Object.keys(AREAS).find(a => AREAS[a][1].some(x => x[0] === nome));
 const NAV = [
-  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['@relatorios'],
+  ['#', 'Financeiro'], ['inicio', 'Início'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['extrato', 'Extrato'], ['fluxo', 'Fluxo de caixa'], ['recorrentes', 'Contas recorrentes'], ['conciliacao', 'Conciliação'], ['financiamentos', 'Financiamentos'], ['@relatorios'],
   ['#', 'Obras'], ['obras', 'Quadras e lotes'], ['vendas', 'Vendas e repasses'], ['@suprimentos'], ['@planejamento'], ['@documentos'],
   ['#', 'Gestão'], ['fornecedores', 'Fornecedores'], ['empresas', 'Empresas (CNPJ)'], ['socios', 'Sócios e participações'], ['arrumar', 'Revisar e classificar'], ['cadastros', 'Cadastros'], ['@sistema']
 ].map(([k, n]) => k[0] === '@' ? [AREAS[k.slice(1)][1][0][0], AREAS[k.slice(1)][0], k.slice(1)] : [k, n]);

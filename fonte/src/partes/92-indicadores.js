@@ -19,7 +19,9 @@ function tirMensal(f) {
 const difMeses = (a, b) => { const [y1, m1] = a.split('-').map(Number), [y2, m2] = b.split('-').map(Number); return (y2 - y1) * 12 + (m2 - m1); };
 function indicadoresDe(qs) {
   const set = new Set(qs); const h = hoje();
-  const ts = S.list.filter(t => set.has(t.quadra) && secaoDe(t.destino) !== 'aporte');
+  /* Sem dívida: só a operação. Os movimentos de financiamento (liberações, juros, amortizações) ficam para a TIR com dívida. */
+  const ts = S.list.filter(t => set.has(t.quadra) && secaoDe(t.destino) !== 'aporte' && !t.fin);
+  const tsFin = S.list.filter(t => set.has(t.quadra) && t.fin);
   const real = ts.filter(pago), ab = ts.filter(t => !pago(t));
   const v = t => t.valor + (pago(t) ? (t.juros || 0) : 0);
   const recReal = sum(real.filter(t => v(t) > 0), v), recAb = sum(ab.filter(t => t.valor > 0), t => t.valor);
@@ -33,9 +35,13 @@ function indicadoresDe(qs) {
   const iP = indicadores(prev); const custoPrev = -(iP.op + iP.non);
   // fluxo mensal (realizado no mês do pagamento; aberto no vencimento, vencidos no mês atual)
   const fl = {}; for (const t of ts) { const d = pago(t) ? (t.pag || t.venc) : (t.venc < h ? h : t.venc); if (!d) continue; const m = d.slice(0, 7); fl[m] = (fl[m] || 0) + v(t); }
-  const ms = Object.keys(fl).sort(); let tir = null, expo = 0, expoMes = '', payback = '', prazo = null; const curva = [];
+  const ms = Object.keys(fl).sort(); let tirLev = null, jurosFin = 0, expoLev = null; let tir = null, expo = 0, expoMes = '', payback = '', prazo = null; const curva = [];
   if (ms.length) { const ini = ms[0], fim = ms[ms.length - 1]; const n = difMeses(ini, fim) + 1; const f = Array(n).fill(0); ms.forEach(m => { f[difMeses(ini, m)] += fl[m]; });
     if (adm) f[0] -= adm; tir = tirMensal(f); let ac = 0;
+    if (tsFin.length) { const fl2 = {}; for (const t of tsFin) { const d = pago(t) ? (t.pag || t.venc) : (t.venc < h ? h : t.venc); if (d) fl2[d.slice(0, 7)] = (fl2[d.slice(0, 7)] || 0) + v(t); }
+      const ini2 = [ini, ...Object.keys(fl2)].sort()[0], fim2 = [fim, ...Object.keys(fl2)].sort().pop(); const g = Array(difMeses(ini2, fim2) + 1).fill(0);
+      ms.forEach(m => { g[difMeses(ini2, m)] += fl[m]; }); for (const m in fl2) g[difMeses(ini2, m)] += fl2[m]; if (adm) g[0] -= adm; tirLev = tirMensal(g);
+      jurosFin = -sum(tsFin, t => t.finTipo === 'juros' ? t.valor : (t.juros || 0)); expoLev = 0; let a2 = 0; g.forEach(x => { a2 += x; if (a2 < expoLev) expoLev = a2; }); }
     f.forEach((x, i) => { ac += x; const m = addMonths(ini + '-01', i).slice(0, 7); curva.push({ m, ac, real: m <= h.slice(0, 7) }); if (ac < expo) { expo = ac; expoMes = m; } });
     const iMin = curva.findIndex(c => c.m === expoMes); const pb = curva.findIndex((c, i) => i > iMin && c.ac >= 0); payback = pb >= 0 ? curva[pb].m : ''; prazo = n; }
   // comercial
@@ -46,7 +52,7 @@ function indicadoresDe(qs) {
   const area = sum(qs.flatMap(q => lotesDe(q).map(l => +String((typeof loteInfo === 'function' ? loteInfo(q, l).construida : '') || '').replace(',', '.') || 0)), x => x);
   return { qs, n: ls.length, vend: vend.length, rep: rep.length, receita, recReal, recAb, custo, custoReal, custoAb, adm, lucro,
     margem: receita ? lucro / receita : null, mop: iC.mop, ml: iC.ml, roi: custo ? lucro / custo : null, moic: custo ? receita / custo : null,
-    tirM: tir, tirA: tir === null ? null : Math.pow(1 + tir, 12) - 1, expo, expoMes, payback, prazo, curva,
+    tirM: tir, tirA: tir === null ? null : Math.pow(1 + tir, 12) - 1, temFin: tsFin.length > 0, tirLevA: tirLev === null ? null : Math.pow(1 + tirLev, 12) - 1, jurosFin, expoLev, roeLev: tsFin.length && expoLev ? (receita - custo - jurosFin) / -expoLev : null, expo, expoMes, payback, prazo, curva,
     custoLote: ls.length ? custo / ls.length : null, ticket: vend.length ? receita / vend.length : null, custoM2: area ? custo / area : null, area,
     vso: ls.length ? vend.length / ls.length : null, repasseDias: dur.length ? sum(dur, x => x) / dur.length : null,
     inad: receita ? vencRec / (recAb || 1) : null, vencRec, recebidoPct: receita ? recReal / receita : null,
@@ -65,10 +71,10 @@ VIEWS.indicadores = {
     const dlt = (a, b) => a === null || b === null || !isFinite(a) || !isFinite(b) ? '' : `<small class="${a >= b ? 'pos' : 'neg'}">previsto ${pct(b)}</small>`;
     el.innerHTML = `<div class="filtros card"><select id="iEsc">${opts(escopos, indEsc)}</select><label class="tgl"><input type="checkbox" id="iAdm" ${indAdm ? 'checked' : ''}> Incluir administração rateada</label><span class="muted small">Projetado = realizado + o que falta receber e pagar</span></div>
       <div class="lbl">Rentabilidade</div>
-      <div class="grid kpis k4">${kpi('Lucro projetado', brl(I.lucro), `receita ${short(I.receita)} − custo ${short(I.custo)}`, cls(I.lucro))}${kpi('Margem líquida', pp(I.margem), dlt(I.margem, I.prevMargem) || 'lucro ÷ receita', cls(I.margem))}${kpi('ROI', pp(I.roi), dlt(I.roi, I.prevRoi) || 'lucro ÷ custo', cls(I.roi))}${kpi('TIR', I.tirA === null ? '—' : pct(I.tirA) + ' a.a.', I.tirM === null ? 'sem fluxo suficiente' : pct(I.tirM) + ' ao mês', cls(I.tirA))}</div>
+      <div class="grid kpis k4">${kpi('Lucro projetado', brl(I.lucro), `receita ${short(I.receita)} − custo ${short(I.custo)}`, cls(I.lucro))}${kpi('Margem líquida', pp(I.margem), dlt(I.margem, I.prevMargem) || 'lucro ÷ receita', cls(I.margem))}${kpi('ROI', pp(I.roi), dlt(I.roi, I.prevRoi) || 'lucro ÷ custo', cls(I.roi))}${kpi(I.temFin ? 'TIR sem dívida' : 'TIR', I.tirA === null ? '—' : pct(I.tirA) + ' a.a.', (I.tirM === null ? 'sem fluxo suficiente' : pct(I.tirM) + ' ao mês') + (I.temFin ? ` · <b>com financiamento: ${I.tirLevA === null || I.tirLevA > 5 ? (I.roeLev === null ? '—' : pct(I.roeLev) + ' sobre o capital dos sócios') : pct(I.tirLevA) + ' a.a.'}</b>` : ''), cls(I.tirA))}</div>
       <div class="grid kpis k4">${kpi('MOIC', I.moic === null ? '—' : I.moic.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'x', 'receita ÷ custo: quanto volta para cada R$ 1 gasto', '')}${kpi('Margem operacional', pp(I.mop), 'antes de despesas não operacionais', '')}${kpi('Custo por lote', I.custoLote === null ? '—' : brl(I.custoLote), I.custoM2 ? `${brl(I.custoM2)} por m² construído` : 'cadastre a área construída do lote para ver por m²', '')}${kpi('Desvio de custo', I.desvioCusto === null ? '—' : (I.desvioCusto > 0 ? '+' : '') + pct(I.desvioCusto), I.custoPrev ? `orçado ${short(I.custoPrev)}` : 'sem orçamento', I.desvioCusto > 0.02 ? 'neg' : I.desvioCusto !== null ? 'pos' : '')}</div>
       <div class="lbl">Caixa</div>
-      <div class="grid kpis k4">${kpi('Exposição máxima', brl(-I.expo), I.expoMes ? 'pico de dinheiro aplicado em ' + mes(I.expoMes) : '', 'neg')}${kpi('Payback', I.payback ? mes(I.payback) : '—', I.payback ? 'quando o caixa acumulado volta a ficar positivo' : 'o caixa ainda não volta ao positivo', '')}${kpi('Prazo da operação', I.prazo ? I.prazo + ' meses' : '—', 'do primeiro ao último movimento', '')}${kpi('Avanço financeiro', pp(I.avanco), 'custo pago ÷ custo orçado', '')}</div>
+      <div class="grid kpis k4">${kpi('Exposição máxima', brl(-I.expo), (I.expoMes ? 'pico de dinheiro aplicado em ' + mes(I.expoMes) : '') + (I.temFin && I.expoLev !== null ? ` · com financiamento: ${brl(-I.expoLev)} dos sócios` : ''), 'neg')}${kpi('Payback', I.payback ? mes(I.payback) : '—', I.payback ? 'quando o caixa acumulado volta a ficar positivo' : 'o caixa ainda não volta ao positivo', '')}${kpi('Prazo da operação', I.prazo ? I.prazo + ' meses' : '—', 'do primeiro ao último movimento', '')}${kpi('Avanço financeiro', pp(I.avanco), 'custo pago ÷ custo orçado', '')}</div>
       <div class="lbl">Comercial</div>
       <div class="grid kpis k4">${kpi('VSO (vendidos)', pp(I.vso), `${I.vend} de ${I.n} lotes · ${I.rep} com repasse recebido`, '')}${kpi('Ticket médio', I.ticket === null ? '—' : brl(I.ticket), 'receita por lote vendido', '')}${kpi('Prazo médio de repasse', I.repasseDias === null ? '—' : Math.round(I.repasseDias) + ' dias', 'da venda ao repasse recebido', '')}${kpi('Inadimplência', pp(I.inad), I.vencRec ? `${brl(I.vencRec)} vencidos há mais de 5 dias` : 'nada vencido', I.vencRec ? 'neg' : '')}</div>
       <div class="card"><h2>Caixa acumulado da operação <span class="hint">a curva J: quanto dinheiro fica aplicado e quando volta</span></h2><div class="chartbox"><canvas id="cJ"></canvas></div></div>
