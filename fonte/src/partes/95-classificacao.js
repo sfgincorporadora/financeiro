@@ -264,7 +264,7 @@ ACOES.quitarConv = d => {
   F.onsubmit = e => { e.preventDefault(); const pr = parseBR(F.pr.value) || 0, ju = parseBR(F.ju.value) || 0; if (!(pr > 0)) { toast('Informe o principal.', 'err'); return; }
     garantirDestinoJuros(); const g = uid(), venc = F.d.value, pago_ = F.pg.checked;
     const base = { juros: 0, quadra: '-', lote: '-', local: '', ambito: 'empresa', emp: empT(t), forn: t.forn || '', venc, status: pago_ ? 'pago' : 'aberto', grupo: g, obs: '', criado: Date.now(), ...(pago_ ? { pag: venc, conta: F.conta.value } : {}) };
-    const out = [{ ...base, id: uid(), item: `Devolução dívida conversível${t.forn ? ' - ' + t.forn : ''}`, valor: -r2(pr), destino: 'Aporte', aporteTipo: 'devolucao' }];
+    const out = [{ ...base, id: uid(), item: `Devolução dívida conversível${t.forn ? ' - ' + t.forn : ''}`, valor: -r2(pr), destino: 'Aporte', aporteTipo: 'devolucao', conv: 1 }];
     if (ju > 0) out.push({ ...base, id: uid(), item: `Juros dívida conversível${t.forn ? ' - ' + t.forn : ''}`, valor: -r2(ju), destino: DEST_JUROS });
     salvarTitulos(out); salvarTitulos(grupo.map(x => ({ ...x, quitada: venc })), { acao: 'devolução sem conversão' });
     f.fechar(); toast(pago_ ? 'Devolução registrada' : 'Devolução lançada em contas a pagar'); };

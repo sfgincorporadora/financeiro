@@ -9,7 +9,8 @@ const cfgSocios = () => S.socios || {};
 const listaSocios = () => cfgSocios().lista || [];
 const acordos = () => cfgSocios().acordos || [];
 function salvarSocios(n) { S.socios = { ...cfgSocios(), ...n }; gravar(doc(db, 'config', 'socios'), S.socios).catch(onErroEscrita); refreshView(); }
-const ehAporteSocio = t => secaoDe(t.destino) === 'aporte' && !TIPOS_FORA_SOCIOS.includes(t.aporteTipo);
+/* Dívida conversível só vira capital do sócio depois de convertida; antes é dívida da empresa. A devolução dela não é retirada. */
+const ehAporteSocio = t => secaoDe(t.destino) === 'aporte' && !t.conv && (!TIPOS_FORA_SOCIOS.includes(t.aporteTipo) || (t.aporteTipo === 'conversivel' && t.conversao && t.conversao <= hoje()));
 /* Nome que aparece depois de "Aporte" na descrição (ex.: "Aporte Eduardo (3/10)"). */
 const nomeNoAporte = t => { const m = normTxt(t.item).match(/^(?:aporte|retirada|devolucao|distribuicao) (?:de |do |da )?([a-z]+)/); return m ? m[1] : ''; };
 function socioDe(t) {
@@ -116,6 +117,7 @@ VIEWS.socios = {
         return !inv ? fx(r.a.partes) : inv.modo === 'liquidado' ? `<b>Cota de ${nm(inv.socio)} (liquidada em ${dBR(dataLiquidacao(inv))}): ${brl(valorCotaLiquidada(inv))}</b> → ${fx(inv.div)}<br>Restante do resultado → ${fx(r.a.partes)}` : `<b>Cota de ${nm(inv.socio)}: ${String(inv.cota).replace('.', ',')}%</b> do resultado → ${fx(inv.div)}<br>Restante (${(100 - inv.cota).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%) → ${fx(r.a.partes)}`; })()}</td><td class="${cls(r.real)}">${brl(r.real)}</td><td class="${cls(r.proj)}">${brl(r.proj)}</td><td><button class="btn sm link rw" data-act="acordoEd" data-id="${esc(r.a.id)}">Editar</button></td></tr>`).join('')}</tbody></table></div>
       <details class="mt"><summary class="small">Resultado por quadra</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Quadra</th><th class="l">Acordo</th><th>Lotes</th><th>Recebido</th><th>Pago</th><th>Realizado</th><th>Projetado</th></tr></thead><tbody>${C.res.flatMap(r => r.rs.map(q => `<tr><td class="l">${esc(q.q)}</td><td class="l">${esc(r.a.nome || '')}</td><td>${q.n < q.total ? q.n + ' de ' + q.total : q.n}</td><td class="pos">${brl(q.rec)}</td><td class="neg">${brl(q.custo)}</td><td class="${cls(q.real)}">${brl(q.real)}</td><td class="${cls(q.proj)}">${brl(q.proj)}</td></tr>`)).join('')}</tbody></table></div></details>`
       : '<p class="muted">Nenhum acordo ainda. Crie um acordo por grupo de quadras com a divisão entre os sócios (ex.: quadras K1, Q1, U1 e Y1: 30% / 70%; demais quadras: 50% / 50%).</p>'}</div>
+      ${quadroConversiveis()}
       ${C.semSocio.length ? `<div class="card"><h2>Aportes sem sócio identificado <span class="muted small">${C.semSocio.length} lançamento(s), ${brl(sum(C.semSocio, t => t.valor))}</span></h2><p class="muted small">Escolha de qual sócio é cada grupo. O app reconhece sozinho descrições como "Aporte Eduardo" ou o nome do sócio no campo fornecedor.</p>
         <div class="arr-lista">${Object.entries(C.semSocio.reduce((o, t) => { (o[chaveGrupo(t)] = o[chaveGrupo(t)] || []).push(t); return o; }, {})).slice(0, 60).map(([k, xs], i) => `<div class="arr-g"><div class="arr-txt"><b>${esc(xs[0].item)}</b><small>${xs.length} lançamento(s) · ${brl2(sum(xs, t => t.valor))} · ${esc(xs[0].forn || '')}</small></div><select data-sg="${i}">${opts(listaSocios().map(s => [s.id, s.nome]), '', 'Sócio…')}</select><button class="btn sm rw" data-sa="${i}" data-k="${esc(k)}">Aplicar</button></div>`).join('')}</div></div>` : ''}`;
     $('#sAdm', el).onchange = e => salvarSocios({ adm: e.target.checked });
@@ -182,3 +184,14 @@ ACOES.socioVer = d => {
   folha(`${x.s.nome} · aportes e retiradas`, `<div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Ano</th><th>Aportou</th><th>Retirou</th><th>Líquido</th></tr></thead><tbody>${Object.keys(porAno).sort().map(a => `<tr><td class="l">${a}</td><td class="pos">${brl(porAno[a][0])}</td><td class="neg">${brl(porAno[a][1])}</td><td>${brl(porAno[a][0] + porAno[a][1])}</td></tr>`).join('')}</tbody></table></div>
     <div class="lbl">Lançamentos (${ts.length})</div><div class="tlist">${ts.slice(0, 300).map(t => linhaTitulo(t, { mostrarPago: true })).join('')}</div>`, { largo: true });
 };
+
+function quadroConversiveis() {
+  const ts = S.list.filter(t => t.aporteTipo === 'conversivel' && t.valor > 0); if (!ts.length) return '';
+  const nomeS = t => { const id = socioDe({ ...t, aporteTipo: 'capital' }); return id ? listaSocios().find(s => s.id === id).nome : (t.forn || 'Investidor'); };
+  const g = {}; for (const t of ts) { const k = (t.grupo || t.id); (g[k] = g[k] || []).push(t); }
+  const linhas = Object.values(g).map(xs => { const t0 = xs[0]; const rec = sum(xs.filter(pago), t => t.valor), prev = sum(xs.filter(t => !pago(t)), t => t.valor);
+    const st = t0.conversao ? `convertida em participação em ${dBR(t0.conversao)}${t0.participacao ? ' (' + esc(t0.participacao) + ')' : ''}` : t0.quitada ? `devolvida em ${dBR(t0.quitada)}` : 'em aberto: ainda é dívida da empresa';
+    return `<tr><td class="l"><b>${esc(nomeS(t0))}</b><br><span class="muted small">${esc(t0.item)}</span></td><td class="pos">${brl(rec)}</td><td>${prev ? brl(prev) : '—'}</td><td class="l">${st}</td><td>${!t0.conversao && !t0.quitada ? `<button class="btn sm rw" data-act="converter" data-id="${esc(t0.id)}">Converter</button> <button class="btn sm rw" data-act="quitarConv" data-id="${esc(t0.id)}">Devolver</button>` : ''}</td></tr>`; }).join('');
+  return `<div class="card"><h2>Dívidas conversíveis</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th class="l">Investidor</th><th>Recebido</th><th>A receber</th><th class="l">Situação</th><th></th></tr></thead><tbody>${linhas}</tbody></table></div>
+    <p class="muted small">Enquanto não é convertida, a dívida conversível fica fora do capital dos sócios (no BP ela está no passivo). Ao converter, passa a contar como capital do investidor nesta tela; se for devolvida, o principal volta ao investidor e os juros entram como despesa.</p></div>`;
+}
