@@ -466,8 +466,8 @@ function telaLogin(msg) {
    ========================================================= */
 function montarShell() {
   document.body.innerHTML = `<div class="app">
-    <aside class="side"><div class="brand"><img class="logo-img" src="${LOGO_BRANCO}" alt=""><div><b>SFG</b><small>INCORPORADORA</small></div></div>
-      <nav>${NAV.map(([k, n, ar]) => k === '#' ? `<div class="sec">${n}</div>` : `<a href="#/${k}" data-nav="${k}" ${ar ? `data-area="${ar}"` : ''}>${ic(ar ? 'area_' + ar : k, 18)}<span>${n}</span></a>`).join('')}</nav>
+    <aside class="side"><div class="brand"><img class="logo-img" src="${LOGO_BRANCO}" alt=""><div><b>SFG</b><small>INCORPORADORA</small></div><button class="side-tgl" id="sideTgl" title="Recolher menu" aria-label="Recolher ou expandir o menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><span>Recolher menu</span></button></div>
+      <nav>${NAV.map(([k, n, ar]) => k === '#' ? `<div class="sec">${n}</div>` : `<a href="#/${k}" data-nav="${k}" title="${esc(n)}" ${ar ? `data-area="${ar}"` : ''}>${ic(ar ? 'area_' + ar : k, 18)}<span>${n}</span></a>`).join('')}</nav>
       <div class="side-foot"><span id="sideUser" class="muted"></span></div></aside>
     <div class="main">
       <header class="top"><button class="icon-btn back hidden" id="btnBack" aria-label="Voltar">${ic('voltar')}</button><img class="tlogo" src="${LOGO_BRANCO}" alt="SFG"><h1 id="title"></h1><span id="sync" class="sync"></span><button class="icon-btn busca-btn" data-act="busca" aria-label="Buscar ou perguntar" title="Buscar ou perguntar (tecla /)">${ic('busca')}</button><button class="icon-btn tema-btn" id="btnTema" data-act="temaCiclo" aria-label="Tema">${ic(temaPref() === 'claro' ? 'sol' : temaPref() === 'escuro' ? 'lua' : 'auto')}</button><button class="btn primary desk rw" data-act="novo">${ic('plus', 18)} Novo lançamento</button></header>
@@ -479,6 +479,9 @@ function montarShell() {
   </div><div id="sheets"></div><div id="toast"></div>`;
   $('#sideUser').textContent = S.user?.email || ''; document.body.classList.toggle('ro', somenteLeitura());
   $('#btnBack').onclick = () => history.back();
+  { const ap = $('.app'); let rec = false; try { rec = localStorage.getItem('sfgMenu') === 'recolhido'; } catch (e) { /* sem storage */ }
+    const aplica = () => { ap.classList.toggle('side-rec', rec); const b = $('#sideTgl'); b.title = rec ? 'Expandir menu' : 'Recolher menu'; b.querySelector('span').textContent = rec ? 'Expandir menu' : 'Recolher menu'; };
+    $('#sideTgl').onclick = () => { rec = !rec; try { localStorage.setItem('sfgMenu', rec ? 'recolhido' : 'aberto'); } catch (e) { /* sem storage */ } aplica(); window.dispatchEvent(new Event('resize')); }; aplica(); }
   atualizarSync();
   document.addEventListener('click', onClick);
   roteador();
